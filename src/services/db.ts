@@ -54,30 +54,39 @@ function saveLocalDb(db: LocalDb) {
 
 // --- SMART API FETCH UTILITY ---
 async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  // 1. Try current origin (relative path)
-  try {
-    const response = await fetch(path, options);
-    // If we get a real response from a running backend (even a validation error), return it.
-    // If it's a 404, it means the API route doesn't exist on this origin (e.g. static hosting).
-    if (response.status !== 404) {
-      return response;
+  const attempts = 3;
+  let delay = 1000;
+
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const response = await fetch(path, options);
+      // If we receive ANY response from the server (even a 404, 500, or validation error),
+      // and it's an API route, return it immediately. The API server is up and functioning.
+      if (response.status !== 404 || path.startsWith('/api/')) {
+        return response;
+      }
+    } catch (err) {
+      // If it's a network/CORS error, retry unless we are out of attempts
+      if (i === attempts - 1) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay *= 1.5;
     }
-  } catch (err) {
-    // If it's a network connection error, proceed to fallback below
   }
 
-  // 2. Try default localhost:3000 as fallback
+  // Fallback to localhost:3000 as a helper ONLY for local dev environments where frontend/backend might be on different ports
   try {
     const absoluteUrl = `http://localhost:3000${path}`;
     const response = await fetch(absoluteUrl, options);
-    if (response.status !== 404) {
+    if (response.status !== 404 || path.startsWith('/api/')) {
       return response;
     }
   } catch (err) {
     // ignore
   }
 
-  // 3. Throw a special error indicating that the server backend is unreachable/non-existent
+  // Only throw if we truly cannot connect to any server endpoint
   throw new Error('ROUTE_NOT_FOUND_OR_UNREACHABLE');
 }
 
@@ -197,7 +206,25 @@ export const authService = {
       });
 
       if (response.ok) {
-        return await response.json();
+        const profile = await response.json() as UserProfile;
+        const dbData = getLocalDb();
+        if (!dbData.users.some((u: any) => u.uid === profile.uid)) {
+          dbData.users.push({ ...profile, password });
+          saveLocalDb(dbData);
+        }
+        dbService.syncDatabase().catch(() => {});
+        return profile;
+      }
+
+      // Try local fallback if server fails
+      try {
+        const localProfile = await signUpLocal(email, password, zaloName, referredByCodeInput);
+        if (localProfile) {
+          dbService.syncDatabase().catch(() => {});
+          return localProfile;
+        }
+      } catch (e) {
+        // ignore fallback error, prefer server response below
       }
 
       let message = 'Đã xảy ra lỗi khi đăng ký.';
@@ -215,6 +242,17 @@ export const authService = {
       }
       throw new Error(message);
     } catch (err) {
+      // Local fallback for offline/unreachable
+      try {
+        const localProfile = await signUpLocal(email, password, zaloName, referredByCodeInput);
+        if (localProfile) {
+          dbService.syncDatabase().catch(() => {});
+          return localProfile;
+        }
+      } catch (localErr) {
+        throw localErr;
+      }
+
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
         throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi bấm "Đăng Ký" lại nhé!');
       }
@@ -234,7 +272,31 @@ export const authService = {
       if (response.ok) {
         const profile = await response.json() as UserProfile;
         localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
+
+        // Sync local storage
+        const dbData = getLocalDb();
+        const existingIdx = dbData.users.findIndex((u: any) => u.uid === profile.uid);
+        if (existingIdx === -1) {
+          dbData.users.push({ ...profile, password });
+        } else {
+          dbData.users[existingIdx] = { ...dbData.users[existingIdx], ...profile, password };
+        }
+        saveLocalDb(dbData);
+
+        dbService.syncDatabase().catch(() => {});
         return profile;
+      }
+
+      // Try local fallback (e.g. server reset/container restarted and lost memory)
+      try {
+        const localProfile = await signInLocal(email, password);
+        if (localProfile) {
+          localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(localProfile));
+          dbService.syncDatabase().catch(() => {});
+          return localProfile;
+        }
+      } catch (e) {
+        // ignore fallback error
       }
 
       let message = 'Đăng nhập không thành công.';
@@ -252,6 +314,18 @@ export const authService = {
       }
       throw new Error(message);
     } catch (err) {
+      // Local fallback for offline/unreachable
+      try {
+        const localProfile = await signInLocal(email, password);
+        if (localProfile) {
+          localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(localProfile));
+          dbService.syncDatabase().catch(() => {});
+          return localProfile;
+        }
+      } catch (localErr) {
+        throw localErr;
+      }
+
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
         throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi bấm "Đăng Nhập" lại nhé!');
       }
@@ -326,14 +400,57 @@ export const authService = {
 
     // Poll auth status every 3 seconds
     const interval = setInterval(checkAuth, 3000);
+
+    // Silent database sync on auth state change load and periodically
+    dbService.syncDatabase().catch(() => {});
+    const syncInterval = setInterval(() => {
+      dbService.syncDatabase().catch(() => {});
+    }, 15000);
+
     return () => {
       clearInterval(interval);
+      clearInterval(syncInterval);
     };
   },
 };
 
 // --- DATA SERVICE ---
 export const dbService = {
+  // Synchronize client LocalStorage database with server database
+  syncDatabase: async (): Promise<void> => {
+    try {
+      const dbData = getLocalDb();
+      const res = await apiFetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          users: dbData.users,
+          leads: dbData.leads
+        })
+      });
+
+      if (res.ok) {
+        const result = await res.json() as { users: any[]; leads: any[] };
+        if (result && Array.isArray(result.users) && Array.isArray(result.leads)) {
+          // Update client-side local database structure
+          const mergedDb: LocalDb = {
+            users: result.users,
+            leads: result.leads
+          };
+          saveLocalDb(mergedDb);
+
+          // Update cache keys for subscriptions
+          localStorage.setItem('lead_ctv_users_cache', JSON.stringify(result.users));
+          localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(result.leads));
+          
+          console.log('[Sync] Database synchronized successfully with server.');
+        }
+      }
+    } catch (err) {
+      console.warn('[Sync] Silent database sync failed (server offline or starting up):', err);
+    }
+  },
+
   // Subscribe to Users list (Realtime Polling)
   subscribeUsers: (callback: (users: UserProfile[]) => void) => {
     const cached = localStorage.getItem('lead_ctv_users_cache');
@@ -374,11 +491,31 @@ export const dbService = {
       });
 
       if (res.ok) {
+        // Update locally
+        const dbData = getLocalDb();
+        const user = dbData.users.find((u: any) => u.uid === uid);
+        if (user) {
+          user.isApproved = true;
+          saveLocalDb(dbData);
+        }
+        dbService.syncDatabase().catch(() => {});
         return;
       }
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Không thể phê duyệt CTV.');
     } catch (err) {
+      // Local fallback
+      try {
+        const dbData = getLocalDb();
+        const user = dbData.users.find((u: any) => u.uid === uid);
+        if (user) {
+          user.isApproved = true;
+          saveLocalDb(dbData);
+          dbService.syncDatabase().catch(() => {});
+          return;
+        }
+      } catch (localErr) {}
+
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
         throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi thử lại nhé!');
       }
@@ -396,11 +533,25 @@ export const dbService = {
       });
 
       if (res.ok) {
+        // Update locally
+        const dbData = getLocalDb();
+        dbData.users = dbData.users.filter((u: any) => u.uid !== uid);
+        saveLocalDb(dbData);
+        dbService.syncDatabase().catch(() => {});
         return;
       }
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Không thể từ chối CTV.');
     } catch (err) {
+      // Local fallback
+      try {
+        const dbData = getLocalDb();
+        dbData.users = dbData.users.filter((u: any) => u.uid !== uid);
+        saveLocalDb(dbData);
+        dbService.syncDatabase().catch(() => {});
+        return;
+      } catch (localErr) {}
+
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
         throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi thử lại nhé!');
       }
@@ -453,11 +604,47 @@ export const dbService = {
       });
 
       if (res.ok) {
-        return await res.json() as Lead;
+        const lead = await res.json() as Lead;
+        const dbData = getLocalDb();
+        dbData.leads = dbData.leads || [];
+        if (!dbData.leads.some((l: any) => l.id === lead.id)) {
+          dbData.leads.push(lead);
+          saveLocalDb(dbData);
+        }
+        dbService.syncDatabase().catch(() => {});
+        return lead;
       }
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Không thể gửi khách hàng lên hệ thống.');
     } catch (err) {
+      // Local fallback in case of network/server failure
+      try {
+        const dbData = getLocalDb();
+        const leadId = 'lead_' + Math.random().toString(36).substr(2, 9);
+        const localLead: Lead = {
+          id: leadId,
+          ctvId: ctvUser.uid,
+          ctvZaloName: ctvUser.zaloName,
+          ctvReferralCode: ctvUser.referralCode,
+          parentCtvId: null, // can be resolved on server sync
+          customerName,
+          customerPhone,
+          note: note || '',
+          status: 'chua_check',
+          isPaidCommission: false,
+          commissionAmount: 0,
+          parentCommissionAmount: 0,
+          createdAt: new Date().toISOString(),
+        };
+        dbData.leads = dbData.leads || [];
+        dbData.leads.push(localLead);
+        saveLocalDb(dbData);
+        dbService.syncDatabase().catch(() => {});
+        return localLead;
+      } catch (localErr) {
+        // ignore
+      }
+
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
         throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi bấm gửi lại nhé!');
       }
@@ -475,11 +662,35 @@ export const dbService = {
       });
 
       if (res.ok) {
+        // Update locally
+        const dbData = getLocalDb();
+        dbData.leads = dbData.leads || [];
+        const idx = dbData.leads.findIndex((l: any) => l.id === leadId);
+        if (idx !== -1) {
+          dbData.leads[idx] = { ...dbData.leads[idx], ...updates };
+          saveLocalDb(dbData);
+        }
+        dbService.syncDatabase().catch(() => {});
         return;
       }
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Không thể cập nhật thông tin khách hàng.');
     } catch (err) {
+      // Local fallback in case of network/server failure
+      try {
+        const dbData = getLocalDb();
+        dbData.leads = dbData.leads || [];
+        const idx = dbData.leads.findIndex((l: any) => l.id === leadId);
+        if (idx !== -1) {
+          dbData.leads[idx] = { ...dbData.leads[idx], ...updates };
+          saveLocalDb(dbData);
+          dbService.syncDatabase().catch(() => {});
+          return;
+        }
+      } catch (localErr) {
+        // ignore
+      }
+
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
         throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi bấm lưu lại nhé!');
       }

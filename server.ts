@@ -413,6 +413,84 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
+// 10. Synchronize client database with server
+app.post('/api/sync', (req, res) => {
+  try {
+    const { users, leads } = req.body;
+    const dbData = readDb();
+    let updated = false;
+
+    // Merge users
+    if (Array.isArray(users)) {
+      users.forEach((clientUser: any) => {
+        if (!clientUser.uid || !clientUser.email) return;
+        const exists = dbData.users.find((u: any) => u.uid === clientUser.uid || u.email.toLowerCase() === clientUser.email.toLowerCase());
+        if (!exists) {
+          dbData.users.push(clientUser);
+          updated = true;
+        } else {
+          let userUpdated = false;
+          if (clientUser.zaloName && exists.zaloName !== clientUser.zaloName) {
+            exists.zaloName = clientUser.zaloName;
+            userUpdated = true;
+          }
+          if (clientUser.isApproved !== undefined && exists.isApproved !== clientUser.isApproved) {
+            exists.isApproved = clientUser.isApproved;
+            userUpdated = true;
+          }
+          if (clientUser.role && exists.role !== clientUser.role) {
+            exists.role = clientUser.role;
+            userUpdated = true;
+          }
+          if (userUpdated) {
+            updated = true;
+          }
+        }
+      });
+    }
+
+    // Merge leads
+    if (Array.isArray(leads)) {
+      leads.forEach((clientLead: any) => {
+        if (!clientLead.id) return;
+        const existsIndex = dbData.leads.findIndex((l: any) => l.id === clientLead.id);
+        if (existsIndex === -1) {
+          dbData.leads.push(clientLead);
+          updated = true;
+        } else {
+          const exists = dbData.leads[existsIndex];
+          if (
+            exists.status !== clientLead.status ||
+            exists.customerName !== clientLead.customerName ||
+            exists.customerPhone !== clientLead.customerPhone ||
+            exists.isPaidCommission !== clientLead.isPaidCommission ||
+            exists.commissionAmount !== clientLead.commissionAmount ||
+            exists.parentCommissionAmount !== clientLead.parentCommissionAmount ||
+            exists.note !== clientLead.note
+          ) {
+            dbData.leads[existsIndex] = { ...exists, ...clientLead };
+            updated = true;
+          }
+        }
+      });
+    }
+
+    if (updated) {
+      writeDb(dbData);
+      logMessage(`Database synchronized: ${dbData.users.length} users, ${dbData.leads.length} leads in total.`);
+    }
+
+    res.json({
+      success: true,
+      users: dbData.users,
+      leads: dbData.leads
+    });
+  } catch (error: any) {
+    logMessage(`Error during sync: ${error.message}`);
+    res.status(500).json({ message: `Lỗi đồng bộ: ${error.message}` });
+  }
+});
+
 // Fallback for unmatched API routes to prevent HTML response
 app.use('/api/*', (req, res) => {
   logMessage(`API Route Not Found: ${req.method} ${req.originalUrl}`);
