@@ -23,8 +23,20 @@ export const authService = {
     });
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.message || 'Đã xảy ra lỗi khi đăng ký.');
+      let message = 'Đã xảy ra lỗi khi đăng ký.';
+      try {
+        const errData = await response.json();
+        if (errData && errData.message) {
+          message = errData.message;
+        }
+      } catch (e) {
+        if (response.status >= 500) {
+          message = `Hệ thống đang khởi động hoặc đang bận (Mã: ${response.status}). Vui lòng đợi 2-3 giây rồi bấm "Đăng Ký" lại nhé!`;
+        } else {
+          message = `Kết nối thất bại (Mã: ${response.status}). Vui lòng kiểm tra lại mạng Internet hoặc thử lại!`;
+        }
+      }
+      throw new Error(message);
     }
 
     return await response.json();
@@ -39,8 +51,20 @@ export const authService = {
     });
 
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.message || 'Đăng nhập không thành công.');
+      let message = 'Đăng nhập không thành công.';
+      try {
+        const errData = await response.json();
+        if (errData && errData.message) {
+          message = errData.message;
+        }
+      } catch (e) {
+        if (response.status >= 500) {
+          message = `Hệ thống đang khởi động hoặc đang bận (Mã: ${response.status}). Vui lòng thử lại sau giây lát!`;
+        } else {
+          message = `Kết nối thất bại (Mã: ${response.status}). Vui lòng kiểm tra lại mạng Internet!`;
+        }
+      }
+      throw new Error(message);
     }
 
     const profile = await response.json() as UserProfile;

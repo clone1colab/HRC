@@ -6,8 +6,28 @@ import { createServer as createViteServer } from 'vite';
 const app = express();
 const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), 'db.json');
+const LOG_FILE = path.join(process.cwd(), 'server.log');
 
 app.use(express.json());
+
+// Log Message Helper
+function logMessage(msg: string) {
+  const timestamp = new Date().toISOString();
+  try {
+    fs.appendFileSync(LOG_FILE, `[${timestamp}] ${msg}\n`, 'utf8');
+    console.log(`[HManager Log] [${timestamp}] ${msg}`);
+  } catch (err) {
+    console.error('Failed to write log:', err);
+  }
+}
+
+// Request Logging Middleware
+app.use((req, res, next) => {
+  if (!req.url.startsWith('/@') && !req.url.startsWith('/src') && !req.url.startsWith('/node_modules')) {
+    logMessage(`REQ: ${req.method} ${req.url} - Body: ${JSON.stringify(req.body)}`);
+  }
+  next();
+});
 
 // Initialize and Read Database
 function readDb() {
@@ -56,107 +76,126 @@ readDb();
 
 // 1. Sign Up CTV
 app.post('/api/auth/signup', (req, res) => {
-  const { email, password, zaloName, referredByCode } = req.body;
-  if (!email || !password || !zaloName) {
-    return res.status(400).json({ message: 'Vui lòng cung cấp đầy đủ thông tin.' });
-  }
-
-  const cleanReferredCode = referredByCode?.trim() || null;
-  const dbData = readDb();
-
-  // Verify email uniqueness
-  if (dbData.users.some((u: any) => u.email === email.toLowerCase())) {
-    return res.status(400).json({ message: 'Email đã được đăng ký trong hệ thống!' });
-  }
-
-  // Verify referral code if provided
-  let parentCtv = null;
-  if (cleanReferredCode) {
-    parentCtv = dbData.users.find((u: any) => u.referralCode === cleanReferredCode);
-    if (!parentCtv) {
-      return res.status(400).json({ message: 'Mã giới thiệu không tồn tại trong hệ thống. Vui lòng kiểm tra lại!' });
+  try {
+    const { email, password, zaloName, referredByCode } = req.body;
+    if (!email || !password || !zaloName) {
+      logMessage(`Signup failed: Missing required fields.`);
+      return res.status(400).json({ message: 'Vui lòng cung cấp đầy đủ thông tin.' });
     }
+
+    const cleanReferredCode = referredByCode?.trim() || null;
+    const dbData = readDb();
+
+    // Verify email uniqueness
+    if (dbData.users.some((u: any) => u.email === email.toLowerCase())) {
+      logMessage(`Signup failed: Email already registered: ${email}`);
+      return res.status(400).json({ message: 'Email đã được đăng ký trong hệ thống!' });
+    }
+
+    // Verify referral code if provided
+    let parentCtv = null;
+    if (cleanReferredCode) {
+      parentCtv = dbData.users.find((u: any) => u.referralCode === cleanReferredCode);
+      if (!parentCtv) {
+        logMessage(`Signup failed: Invalid referral code: ${cleanReferredCode}`);
+        return res.status(400).json({ message: 'Mã giới thiệu không tồn tại trong hệ thống. Vui lòng kiểm tra lại!' });
+      }
+    }
+
+    // Generate unique 6-digit referral code
+    const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+    let referralCode = generateCode();
+    let attempts = 0;
+    while (dbData.users.some((u: any) => u.referralCode === referralCode) && attempts < 50) {
+      referralCode = generateCode();
+      attempts++;
+    }
+
+    const isAdminAccount = email.toLowerCase() === 'clone1phobo@gmail.com';
+    const role = isAdminAccount ? 'admin' : 'ctv';
+    const isApproved = isAdminAccount ? true : false;
+    const uid = 'user_' + Math.random().toString(36).substr(2, 9);
+
+    const newUser = {
+      uid,
+      email: email.toLowerCase(),
+      password,
+      zaloName,
+      role,
+      isApproved,
+      referralCode,
+      referredByCode: cleanReferredCode,
+      createdAt: new Date().toISOString(),
+    };
+
+    dbData.users.push(newUser);
+    writeDb(dbData);
+
+    logMessage(`Signup success: ${email} (UID: ${uid}, Role: ${role})`);
+    const { password: _, ...profile } = newUser;
+    res.json(profile);
+  } catch (error: any) {
+    logMessage(`CRITICAL error in signup: ${error.stack || error.message}`);
+    res.status(500).json({ message: `Lỗi máy chủ: ${error.message}` });
   }
-
-  // Generate unique 6-digit referral code
-  const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
-  let referralCode = generateCode();
-  let attempts = 0;
-  while (dbData.users.some((u: any) => u.referralCode === referralCode) && attempts < 50) {
-    referralCode = generateCode();
-    attempts++;
-  }
-
-  const isAdminAccount = email.toLowerCase() === 'clone1phobo@gmail.com';
-  const role = isAdminAccount ? 'admin' : 'ctv';
-  const isApproved = isAdminAccount ? true : false;
-  const uid = 'user_' + Math.random().toString(36).substr(2, 9);
-
-  const newUser = {
-    uid,
-    email: email.toLowerCase(),
-    password,
-    zaloName,
-    role,
-    isApproved,
-    referralCode,
-    referredByCode: cleanReferredCode,
-    createdAt: new Date().toISOString(),
-  };
-
-  dbData.users.push(newUser);
-  writeDb(dbData);
-
-  const { password: _, ...profile } = newUser;
-  res.json(profile);
 });
 
 // 2. Sign In CTV / Admin
 app.post('/api/auth/signin', (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Vui lòng nhập email và mật khẩu.' });
-  }
-
-  const normalizedEmail = email.toLowerCase();
-  const isAdminAccount = normalizedEmail === 'clone1phobo@gmail.com';
-  const dbData = readDb();
-
-  let user = dbData.users.find((u: any) => u.email === normalizedEmail);
-
-  if (!user) {
-    // Auto-seed admin user if they are logging in for the first time
-    if (isAdminAccount && password === 'nguyen2000') {
-      const referralCode = '123456';
-      const uid = 'admin_default_uid';
-      user = {
-        uid,
-        email: normalizedEmail,
-        password,
-        zaloName: 'Lê Đức Nguyên',
-        role: 'admin',
-        isApproved: true,
-        referralCode,
-        referredByCode: null,
-        createdAt: new Date().toISOString(),
-      };
-      dbData.users.push(user);
-      writeDb(dbData);
-    } else {
-      return res.status(400).json({ message: 'Tài khoản không tồn tại hoặc sai thông tin.' });
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Vui lòng nhập email và mật khẩu.' });
     }
-  }
 
-  if (user.password !== password) {
-    return res.status(400).json({ message: 'Mật khẩu không chính xác.' });
-  }
+    const normalizedEmail = email.toLowerCase();
+    const isAdminAccount = normalizedEmail === 'clone1phobo@gmail.com';
+    const dbData = readDb();
 
-  if (!user.isApproved && user.role !== 'admin') {
-    return res.status(403).json({ message: 'Tài khoản của bạn đang chờ Admin xét duyệt. Vui lòng quay lại sau!' });
-  }
+    let user = dbData.users.find((u: any) => u.email === normalizedEmail);
 
-  const { password: _, ...profile } = user;
-  res.json(profile);
+    if (!user) {
+      // Auto-seed admin user if they are logging in for the first time
+      if (isAdminAccount && password === 'nguyen2000') {
+        const referralCode = '123456';
+        const uid = 'admin_default_uid';
+        user = {
+          uid,
+          email: normalizedEmail,
+          password,
+          zaloName: 'Lê Đức Nguyên',
+          role: 'admin',
+          isApproved: true,
+          referralCode,
+          referredByCode: null,
+          createdAt: new Date().toISOString(),
+        };
+        dbData.users.push(user);
+        writeDb(dbData);
+        logMessage(`Admin auto-seeded and logged in: ${normalizedEmail}`);
+      } else {
+        logMessage(`Signin failed: User not found: ${normalizedEmail}`);
+        return res.status(400).json({ message: 'Tài khoản không tồn tại hoặc sai thông tin.' });
+      }
+    }
+
+    if (user.password !== password) {
+      logMessage(`Signin failed: Incorrect password for ${normalizedEmail}`);
+      return res.status(400).json({ message: 'Mật khẩu không chính xác.' });
+    }
+
+    if (!user.isApproved && user.role !== 'admin') {
+      logMessage(`Signin failed: Pending approval for ${normalizedEmail}`);
+      return res.status(403).json({ message: 'Tài khoản của bạn đang chờ Admin xét duyệt. Vui lòng quay lại sau!' });
+    }
+
+    logMessage(`Signin success: ${normalizedEmail} (Role: ${user.role})`);
+    const { password: _, ...profile } = user;
+    res.json(profile);
+  } catch (error: any) {
+    logMessage(`CRITICAL error in signin: ${error.stack || error.message}`);
+    res.status(500).json({ message: `Lỗi máy chủ: ${error.message}` });
+  }
 });
 
 // 3. Get User Profile by UID (for auth state watching)
