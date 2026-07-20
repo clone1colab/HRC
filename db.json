@@ -10,6 +10,17 @@
       "referralCode": "123456",
       "referredByCode": null,
       "createdAt": "2026-07-20T10:45:37.730Z"
+    },
+    {
+      "uid": "user_o1wiasbp9",
+      "email": "yash_test_38mm2@gmail.com",
+      "password": "password123",
+      "zaloName": "Test User",
+      "role": "ctv",
+      "isApproved": true,
+      "referralCode": "197345",
+      "referredByCode": null,
+      "createdAt": "2026-07-20T14:41:37.246Z"
     }
   ],
   "leads": []

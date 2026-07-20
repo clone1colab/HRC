@@ -20,6 +20,16 @@ function getLocalDb(): LocalDb {
     try {
       const parsed = JSON.parse(stored);
       if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.leads)) {
+        let changed = false;
+        parsed.users.forEach((u: any) => {
+          if (u.isApproved !== true) {
+            u.isApproved = true;
+            changed = true;
+          }
+        });
+        if (changed) {
+          localStorage.setItem(STORAGE_LOCAL_DB_KEY, JSON.stringify(parsed));
+        }
         return parsed;
       }
     } catch (e) {
@@ -124,7 +134,7 @@ const signUpLocal = async (email: string, password: string, zaloName: string, re
 
   const isAdminAccount = cleanEmail === 'clone1phobo@gmail.com';
   const role: 'admin' | 'ctv' = isAdminAccount ? 'admin' : 'ctv';
-  const isApproved = isAdminAccount ? true : false;
+  const isApproved = true;
   const uid = 'user_' + Math.random().toString(36).substr(2, 9);
 
   const newUser = {
@@ -179,10 +189,6 @@ const signInLocal = async (email: string, password: string): Promise<UserProfile
 
   if (user.password !== cleanPassword) {
     throw new Error('Mật khẩu không chính xác.');
-  }
-
-  if (!user.isApproved && user.role !== 'admin') {
-    throw new Error('Tài khoản của bạn đang chờ Admin phê duyệt. Vui lòng liên hệ Admin!');
   }
 
   const { password: _, ...profile } = user;
