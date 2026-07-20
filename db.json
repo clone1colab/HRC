@@ -10,17 +10,6 @@
       "referralCode": "123456",
       "referredByCode": null,
       "createdAt": "2026-07-20T10:45:37.730Z"
-    },
-    {
-      "uid": "user_gnxzd91wq",
-      "email": "test@gmail.com",
-      "password": "password123",
-      "zaloName": "Test Zalo",
-      "role": "ctv",
-      "isApproved": false,
-      "referralCode": "393483",
-      "referredByCode": null,
-      "createdAt": "2026-07-20T11:00:54.105Z"
     }
   ],
   "leads": []
