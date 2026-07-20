@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+        (request.auth.token.email == 'clone1phobo@gmail.com' || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+
+    // Helper to check if user is approved
+    function isApprovedCTV() {
+      return request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isApproved == true;
+    }
+
+    // Rules for Users
+    match /users/{userId} {
+      // Allow reading profile if it's the user themselves or the admin
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      
+      // Allow creation during sign up (user creates their own profile)
+      allow create: if request.auth != null && request.auth.uid == userId;
+      
+      // Only Admin can update other fields (like isApproved or role)
+      allow update, delete: if isAdmin();
+    }
+
+    // Rules for Leads
+    match /leads/{leadId} {
+      // Admin can do anything. CTVs can read if they are the direct referrer or the parent referrer
+      allow read: if request.auth != null && (
+        isAdmin() || 
+        resource.data.ctvId == request.auth.uid || 
+        resource.data.parentCtvId == request.auth.uid
+      );
+      
+      // Approved CTVs can create leads
+      allow create: if request.auth != null && (
+        isAdmin() || 
+        (isApprovedCTV() && request.resource.data.ctvId == request.auth.uid)
+      );
+      
+      // Only Admin can update or delete leads
+      allow update, delete: if isAdmin();
+    }
+  }
+}

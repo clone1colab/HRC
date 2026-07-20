@@ -1,0 +1,6 @@
+{
+  "name": "Collaborator & Lead Management System",
+  "description": "Hệ thống quản lý cộng tác viên (CTV) và khách hàng tiềm năng thời gian thực sử dụng React và Firebase, hỗ trợ tính toán hoa hồng trực tiếp & gián tiếp đa cấp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
