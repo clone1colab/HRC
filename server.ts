@@ -82,6 +82,11 @@ readDb();
 
 // --- API ROUTES ---
 
+// Health Check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 // 1. Sign Up CTV
 app.post('/api/auth/signup', (req, res) => {
   try {

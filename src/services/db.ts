@@ -6,23 +6,200 @@
 import { UserProfile, Lead, CTVStats } from '../types';
 
 const STORAGE_CURRENT_USER_KEY = 'ctv_lead_current_user';
+const STORAGE_LOCAL_DB_KEY = 'ctv_lead_local_db';
+
+// --- LOCAL STORAGE DATABASE HELPERS ---
+interface LocalDb {
+  users: any[];
+  leads: any[];
+}
+
+function getLocalDb(): LocalDb {
+  const stored = localStorage.getItem(STORAGE_LOCAL_DB_KEY);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.leads)) {
+        return parsed;
+      }
+    } catch (e) {
+      // ignore parsing error
+    }
+  }
+  
+  // Initial database state
+  const initial: LocalDb = {
+    users: [
+      {
+        uid: 'admin_default_uid',
+        email: 'clone1phobo@gmail.com',
+        password: 'nguyen2000',
+        zaloName: 'Lê Đức Nguyên',
+        role: 'admin',
+        isApproved: true,
+        referralCode: '123456',
+        referredByCode: null,
+        createdAt: new Date().toISOString(),
+      }
+    ],
+    leads: []
+  };
+  localStorage.setItem(STORAGE_LOCAL_DB_KEY, JSON.stringify(initial));
+  return initial;
+}
+
+function saveLocalDb(db: LocalDb) {
+  localStorage.setItem(STORAGE_LOCAL_DB_KEY, JSON.stringify(db));
+}
+
+// --- SMART API FETCH UTILITY ---
+async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  // 1. Try current origin (relative path)
+  try {
+    const response = await fetch(path, options);
+    // If we get a real response from a running backend (even a validation error), return it.
+    // If it's a 404, it means the API route doesn't exist on this origin (e.g. static hosting).
+    if (response.status !== 404) {
+      return response;
+    }
+  } catch (err) {
+    // If it's a network connection error, proceed to fallback below
+  }
+
+  // 2. Try default localhost:3000 as fallback
+  try {
+    const absoluteUrl = `http://localhost:3000${path}`;
+    const response = await fetch(absoluteUrl, options);
+    if (response.status !== 404) {
+      return response;
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  // 3. Throw a special error indicating that the server backend is unreachable/non-existent
+  throw new Error('ROUTE_NOT_FOUND_OR_UNREACHABLE');
+}
+
+// --- LOCAL DB FALLBACK IMPLEMENTATIONS ---
+const signUpLocal = async (email: string, password: string, zaloName: string, referredByCode: string | null): Promise<UserProfile> => {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPassword = password.trim();
+  const cleanZaloName = zaloName.trim();
+  const cleanReferredCode = referredByCode?.trim() || null;
+
+  const dbData = getLocalDb();
+
+  // Check unique email
+  if (dbData.users.some((u: any) => u.email === cleanEmail)) {
+    throw new Error('Email đã được đăng ký trong hệ thống!');
+  }
+
+  // Verify referral code if provided
+  let parentCtv = null;
+  if (cleanReferredCode) {
+    parentCtv = dbData.users.find((u: any) => u.referralCode === cleanReferredCode);
+    if (!parentCtv) {
+      throw new Error('Mã giới thiệu không tồn tại trong hệ thống. Vui lòng kiểm tra lại!');
+    }
+  }
+
+  // Generate unique 6-digit referral code
+  const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+  let referralCode = generateCode();
+  let attempts = 0;
+  while (dbData.users.some((u: any) => u.referralCode === referralCode) && attempts < 50) {
+    referralCode = generateCode();
+    attempts++;
+  }
+
+  const isAdminAccount = cleanEmail === 'clone1phobo@gmail.com';
+  const role: 'admin' | 'ctv' = isAdminAccount ? 'admin' : 'ctv';
+  const isApproved = isAdminAccount ? true : false;
+  const uid = 'user_' + Math.random().toString(36).substr(2, 9);
+
+  const newUser = {
+    uid,
+    email: cleanEmail,
+    password: cleanPassword,
+    zaloName: cleanZaloName,
+    role,
+    isApproved,
+    referralCode,
+    referredByCode: cleanReferredCode,
+    createdAt: new Date().toISOString(),
+  };
+
+  dbData.users.push(newUser);
+  saveLocalDb(dbData);
+
+  const { password: _, ...profile } = newUser;
+  return profile;
+};
+
+const signInLocal = async (email: string, password: string): Promise<UserProfile> => {
+  const normalizedEmail = email.trim().toLowerCase();
+  const cleanPassword = password.trim();
+  const isAdminAccount = normalizedEmail === 'clone1phobo@gmail.com';
+  const dbData = getLocalDb();
+
+  let user = dbData.users.find((u: any) => u.email === normalizedEmail);
+
+  if (!user) {
+    // Auto-seed admin user if logging in for the first time
+    if (isAdminAccount && cleanPassword === 'nguyen2000') {
+      const referralCode = '123456';
+      const uid = 'admin_default_uid';
+      user = {
+        uid,
+        email: normalizedEmail,
+        password: cleanPassword,
+        zaloName: 'Lê Đức Nguyên',
+        role: 'admin',
+        isApproved: true,
+        referralCode,
+        referredByCode: null,
+        createdAt: new Date().toISOString(),
+      };
+      dbData.users.push(user);
+      saveLocalDb(dbData);
+    } else {
+      throw new Error('Tài khoản không tồn tại hoặc sai thông tin.');
+    }
+  }
+
+  if (user.password !== cleanPassword) {
+    throw new Error('Mật khẩu không chính xác.');
+  }
+
+  if (!user.isApproved && user.role !== 'admin') {
+    throw new Error('Tài khoản của bạn đang chờ Admin phê duyệt. Vui lòng liên hệ Admin!');
+  }
+
+  const { password: _, ...profile } = user;
+  return profile;
+};
 
 // --- AUTH SERVICE ---
 export const authService = {
   // Sign up CTV
   signUp: async (email: string, password: string, zaloName: string, referredByCodeInput: string | null): Promise<UserProfile> => {
-    const response = await fetch('/api/auth/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        password,
-        zaloName,
-        referredByCode: referredByCodeInput,
-      }),
-    });
+    try {
+      const response = await apiFetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          zaloName,
+          referredByCode: referredByCodeInput,
+        }),
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        return await response.json();
+      }
+
       let message = 'Đã xảy ra lỗi khi đăng ký.';
       try {
         const errData = await response.json();
@@ -37,20 +214,30 @@ export const authService = {
         }
       }
       throw new Error(message);
+    } catch (err) {
+      // If server route is not found or server is unreachable, fall back to localStorage database
+      if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
+        return await signUpLocal(email, password, zaloName, referredByCodeInput);
+      }
+      throw err;
     }
-
-    return await response.json();
   },
 
   // Sign in
   signIn: async (email: string, password: string): Promise<UserProfile> => {
-    const response = await fetch('/api/auth/signin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
+    try {
+      const response = await apiFetch('/api/auth/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        const profile = await response.json() as UserProfile;
+        localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
+        return profile;
+      }
+
       let message = 'Đăng nhập không thành công.';
       try {
         const errData = await response.json();
@@ -65,11 +252,14 @@ export const authService = {
         }
       }
       throw new Error(message);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
+        const profile = await signInLocal(email, password);
+        localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
+        return profile;
+      }
+      throw err;
     }
-
-    const profile = await response.json() as UserProfile;
-    localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
-    return profile;
   },
 
   // Sign out
@@ -89,7 +279,7 @@ export const authService = {
         const cachedUser = JSON.parse(stored) as UserProfile;
         
         // Fetch fresh profile from server to check if approved, updated, or deleted
-        const res = await fetch(`/api/users/profile?uid=${cachedUser.uid}`);
+        const res = await apiFetch(`/api/users/profile?uid=${cachedUser.uid}`);
         if (res.ok) {
           const freshUser = await res.json() as UserProfile;
           
@@ -115,10 +305,19 @@ export const authService = {
           callback(cachedUser);
         }
       } catch (err) {
-        // Fall back to cached stored user on network error
+        // Fall back to local database
         try {
           const cachedUser = JSON.parse(stored) as UserProfile;
-          callback(cachedUser);
+          const dbData = getLocalDb();
+          const localUser = dbData.users.find((u: any) => u.uid === cachedUser.uid);
+          if (localUser) {
+            const { password: _, ...profile } = localUser;
+            localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
+            callback(profile);
+          } else {
+            localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+            callback(null);
+          }
         } catch (_) {
           callback(null);
         }
@@ -142,14 +341,20 @@ export const dbService = {
   subscribeUsers: (callback: (users: UserProfile[]) => void) => {
     const fetchUsers = async () => {
       try {
-        const res = await fetch('/api/users');
+        const res = await apiFetch('/api/users');
         if (res.ok) {
           const users = await res.json() as UserProfile[];
           callback(users);
+          return;
         }
       } catch (err) {
-        console.error('Error fetching users:', err);
+        // ignore
       }
+      
+      // Fallback to local
+      const dbData = getLocalDb();
+      const safeUsers = dbData.users.map(({ password, ...u }) => u);
+      callback(safeUsers);
     };
 
     fetchUsers();
@@ -161,15 +366,31 @@ export const dbService = {
 
   // Approve a CTV account
   approveUser: async (uid: string): Promise<void> => {
-    const res = await fetch('/api/users/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid }),
-    });
+    try {
+      const res = await apiFetch('/api/users/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid }),
+      });
 
-    if (!res.ok) {
+      if (res.ok) {
+        return;
+      }
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Không thể phê duyệt CTV.');
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
+        const dbData = getLocalDb();
+        const user = dbData.users.find((u: any) => u.uid === uid);
+        if (user) {
+          user.isApproved = true;
+          saveLocalDb(dbData);
+          return;
+        } else {
+          throw new Error('Không tìm thấy cộng tác viên.');
+        }
+      }
+      throw err;
     }
   },
 
@@ -177,14 +398,19 @@ export const dbService = {
   subscribeLeads: (callback: (leads: Lead[]) => void) => {
     const fetchLeads = async () => {
       try {
-        const res = await fetch('/api/leads');
+        const res = await apiFetch('/api/leads');
         if (res.ok) {
           const leads = await res.json() as Lead[];
           callback(leads);
+          return;
         }
       } catch (err) {
-        console.error('Error fetching leads:', err);
+        // ignore
       }
+      
+      // Fallback to local
+      const dbData = getLocalDb();
+      callback(dbData.leads || []);
     };
 
     fetchLeads();
@@ -196,36 +422,93 @@ export const dbService = {
 
   // Add a new Lead
   addLead: async (customerName: string, customerPhone: string, note: string, ctvUser: UserProfile): Promise<Lead> => {
-    const res = await fetch('/api/leads', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        customerName,
-        customerPhone,
-        note,
-        ctvUser,
-      }),
-    });
+    try {
+      const res = await apiFetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName,
+          customerPhone,
+          note,
+          ctvUser,
+        }),
+      });
 
-    if (!res.ok) {
+      if (res.ok) {
+        return await res.json() as Lead;
+      }
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Không thể gửi khách hàng lên hệ thống.');
-    }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
+        const dbData = getLocalDb();
+        const parentCtvId = ctvUser.referredByCode 
+          ? (dbData.users.find((u: any) => u.referralCode === ctvUser.referredByCode)?.uid || null)
+          : null;
 
-    return await res.json() as Lead;
+        const newLead: Lead = {
+          id: 'lead_' + Math.random().toString(36).substr(2, 9),
+          ctvId: ctvUser.uid,
+          ctvZaloName: ctvUser.zaloName,
+          ctvReferralCode: ctvUser.referralCode,
+          parentCtvId,
+          customerName: customerName.trim(),
+          customerPhone: customerPhone.trim(),
+          note: note.trim(),
+          status: 'chua_check',
+          isPaidCommission: false,
+          commissionAmount: 0,
+          parentCommissionAmount: 0,
+          createdAt: new Date().toISOString(),
+        };
+
+        dbData.leads = dbData.leads || [];
+        dbData.leads.push(newLead);
+        saveLocalDb(dbData);
+        return newLead;
+      }
+      throw err;
+    }
   },
 
   // Update a Lead (Status, commission amount, paid status)
   updateLead: async (leadId: string, updates: Partial<Lead>): Promise<void> => {
-    const res = await fetch(`/api/leads/${leadId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    });
+    try {
+      const res = await apiFetch(`/api/leads/${leadId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
 
-    if (!res.ok) {
+      if (res.ok) {
+        return;
+      }
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Không thể cập nhật thông tin khách hàng.');
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
+        const dbData = getLocalDb();
+        dbData.leads = dbData.leads || [];
+        const lead = dbData.leads.find((l: any) => l.id === leadId);
+        if (!lead) {
+          throw new Error('Không tìm thấy thông tin khách hàng.');
+        }
+
+        Object.assign(lead, updates);
+
+        if (updates.status === 'chot_don') {
+          if (lead.commissionAmount === undefined || lead.commissionAmount === null || lead.commissionAmount === 0) {
+            lead.commissionAmount = 500000; // Default direct: 500,000 VND
+          }
+          if (lead.parentCommissionAmount === undefined || lead.parentCommissionAmount === null || lead.parentCommissionAmount === 0) {
+            lead.parentCommissionAmount = 100000; // Default F1 parent: 100,000 VND
+          }
+        }
+
+        saveLocalDb(dbData);
+        return;
+      }
+      throw err;
     }
   },
 
@@ -233,14 +516,78 @@ export const dbService = {
   subscribeCTVStats: (ctvId: string, callback: (stats: CTVStats) => void) => {
     const fetchStats = async () => {
       try {
-        const res = await fetch(`/api/stats?ctvId=${ctvId}`);
+        const res = await apiFetch(`/api/stats?ctvId=${ctvId}`);
         if (res.ok) {
           const stats = await res.json() as CTVStats;
           callback(stats);
+          return;
         }
       } catch (err) {
-        console.error('Error fetching CTV stats:', err);
+        // ignore
       }
+
+      // Fallback to local
+      const dbData = getLocalDb();
+      dbData.leads = dbData.leads || [];
+      dbData.users = dbData.users || [];
+
+      const ctv = dbData.users.find((u: any) => u.uid === ctvId);
+      if (!ctv) {
+        callback({
+          directSalesCount: 0,
+          f1SalesCount: 0,
+          directCommission: 0,
+          parentCommission: 0,
+          totalCommissionPaid: 0,
+          totalCommissionPending: 0,
+        });
+        return;
+      }
+
+      const f1Ctvs = dbData.users.filter((u: any) => u.referredByCode === ctv.referralCode);
+      const f1Uids = f1Ctvs.map((u: any) => u.uid);
+
+      const directLeads = dbData.leads.filter((l: any) => l.ctvId === ctvId);
+      const f1Leads = dbData.leads.filter((l: any) => f1Uids.includes(l.ctvId));
+
+      const directSalesCount = directLeads.filter((l: any) => l.status === 'chot_don').length;
+      const f1SalesCount = f1Leads.filter((l: any) => l.status === 'chot_don').length;
+
+      const directCommission = directLeads
+        .filter((l: any) => l.status === 'chot_don')
+        .reduce((sum: number, l: any) => sum + (l.commissionAmount || 0), 0);
+
+      const parentCommission = f1Leads
+        .filter((l: any) => l.status === 'chot_don')
+        .reduce((sum: number, l: any) => sum + (l.parentCommissionAmount || 0), 0);
+
+      let totalCommissionPaid = 0;
+      let totalCommissionPending = 0;
+
+      directLeads.filter((l: any) => l.status === 'chot_don').forEach((l: any) => {
+        if (l.isPaidCommission) {
+          totalCommissionPaid += l.commissionAmount || 0;
+        } else {
+          totalCommissionPending += l.commissionAmount || 0;
+        }
+      });
+
+      f1Leads.filter((l: any) => l.status === 'chot_don').forEach((l: any) => {
+        if (l.isPaidCommission) {
+          totalCommissionPaid += l.parentCommissionAmount || 0;
+        } else {
+          totalCommissionPending += l.parentCommissionAmount || 0;
+        }
+      });
+
+      callback({
+        directSalesCount,
+        f1SalesCount,
+        directCommission,
+        parentCommission,
+        totalCommissionPaid,
+        totalCommissionPending,
+      });
     };
 
     fetchStats();
