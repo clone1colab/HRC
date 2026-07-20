@@ -215,9 +215,8 @@ export const authService = {
       }
       throw new Error(message);
     } catch (err) {
-      // If server route is not found or server is unreachable, fall back to localStorage database
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
-        return await signUpLocal(email, password, zaloName, referredByCodeInput);
+        throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi bấm "Đăng Ký" lại nhé!');
       }
       throw err;
     }
@@ -254,9 +253,7 @@ export const authService = {
       throw new Error(message);
     } catch (err) {
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
-        const profile = await signInLocal(email, password);
-        localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
-        return profile;
+        throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi bấm "Đăng Nhập" lại nhé!');
       }
       throw err;
     }
@@ -339,22 +336,25 @@ export const authService = {
 export const dbService = {
   // Subscribe to Users list (Realtime Polling)
   subscribeUsers: (callback: (users: UserProfile[]) => void) => {
+    const cached = localStorage.getItem('lead_ctv_users_cache');
+    if (cached) {
+      try {
+        callback(JSON.parse(cached));
+      } catch (e) {}
+    }
+
     const fetchUsers = async () => {
       try {
         const res = await apiFetch('/api/users');
         if (res.ok) {
           const users = await res.json() as UserProfile[];
+          localStorage.setItem('lead_ctv_users_cache', JSON.stringify(users));
           callback(users);
           return;
         }
       } catch (err) {
-        // ignore
+        // ignore to retain previous state/cache
       }
-      
-      // Fallback to local
-      const dbData = getLocalDb();
-      const safeUsers = dbData.users.map(({ password, ...u }) => u);
-      callback(safeUsers);
     };
 
     fetchUsers();
@@ -380,15 +380,7 @@ export const dbService = {
       throw new Error(errData.message || 'Không thể phê duyệt CTV.');
     } catch (err) {
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
-        const dbData = getLocalDb();
-        const user = dbData.users.find((u: any) => u.uid === uid);
-        if (user) {
-          user.isApproved = true;
-          saveLocalDb(dbData);
-          return;
-        } else {
-          throw new Error('Không tìm thấy cộng tác viên.');
-        }
+        throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi thử lại nhé!');
       }
       throw err;
     }
@@ -410,15 +402,7 @@ export const dbService = {
       throw new Error(errData.message || 'Không thể từ chối CTV.');
     } catch (err) {
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
-        const dbData = getLocalDb();
-        const index = dbData.users.findIndex((u: any) => u.uid === uid);
-        if (index !== -1) {
-          dbData.users.splice(index, 1);
-          saveLocalDb(dbData);
-          return;
-        } else {
-          throw new Error('Không tìm thấy cộng tác viên.');
-        }
+        throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi thử lại nhé!');
       }
       throw err;
     }
@@ -426,21 +410,25 @@ export const dbService = {
 
   // Subscribe to Leads (Realtime Polling)
   subscribeLeads: (callback: (leads: Lead[]) => void) => {
+    const cached = localStorage.getItem('lead_ctv_leads_cache');
+    if (cached) {
+      try {
+        callback(JSON.parse(cached));
+      } catch (e) {}
+    }
+
     const fetchLeads = async () => {
       try {
         const res = await apiFetch('/api/leads');
         if (res.ok) {
           const leads = await res.json() as Lead[];
+          localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(leads));
           callback(leads);
           return;
         }
       } catch (err) {
-        // ignore
+        // ignore to retain previous state/cache
       }
-      
-      // Fallback to local
-      const dbData = getLocalDb();
-      callback(dbData.leads || []);
     };
 
     fetchLeads();
@@ -471,31 +459,7 @@ export const dbService = {
       throw new Error(errData.message || 'Không thể gửi khách hàng lên hệ thống.');
     } catch (err) {
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
-        const dbData = getLocalDb();
-        const parentCtvId = ctvUser.referredByCode 
-          ? (dbData.users.find((u: any) => u.referralCode === ctvUser.referredByCode)?.uid || null)
-          : null;
-
-        const newLead: Lead = {
-          id: 'lead_' + Math.random().toString(36).substr(2, 9),
-          ctvId: ctvUser.uid,
-          ctvZaloName: ctvUser.zaloName,
-          ctvReferralCode: ctvUser.referralCode,
-          parentCtvId,
-          customerName: customerName.trim(),
-          customerPhone: customerPhone.trim(),
-          note: note.trim(),
-          status: 'chua_check',
-          isPaidCommission: false,
-          commissionAmount: 0,
-          parentCommissionAmount: 0,
-          createdAt: new Date().toISOString(),
-        };
-
-        dbData.leads = dbData.leads || [];
-        dbData.leads.push(newLead);
-        saveLocalDb(dbData);
-        return newLead;
+        throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi bấm gửi lại nhé!');
       }
       throw err;
     }
@@ -517,26 +481,7 @@ export const dbService = {
       throw new Error(errData.message || 'Không thể cập nhật thông tin khách hàng.');
     } catch (err) {
       if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
-        const dbData = getLocalDb();
-        dbData.leads = dbData.leads || [];
-        const lead = dbData.leads.find((l: any) => l.id === leadId);
-        if (!lead) {
-          throw new Error('Không tìm thấy thông tin khách hàng.');
-        }
-
-        Object.assign(lead, updates);
-
-        if (updates.status === 'chot_don') {
-          if (lead.commissionAmount === undefined || lead.commissionAmount === null || lead.commissionAmount === 0) {
-            lead.commissionAmount = 500000; // Default direct: 500,000 VND
-          }
-          if (lead.parentCommissionAmount === undefined || lead.parentCommissionAmount === null || lead.parentCommissionAmount === 0) {
-            lead.parentCommissionAmount = 100000; // Default F1 parent: 100,000 VND
-          }
-        }
-
-        saveLocalDb(dbData);
-        return;
+        throw new Error('Hệ thống đang khởi động lại hoặc đồng bộ hóa dữ liệu. Vui lòng đợi 2-3 giây rồi bấm lưu lại nhé!');
       }
       throw err;
     }
@@ -544,80 +489,26 @@ export const dbService = {
 
   // Subscribe to statistics for a specific CTV (Realtime Polling)
   subscribeCTVStats: (ctvId: string, callback: (stats: CTVStats) => void) => {
+    const cacheKey = `lead_ctv_stats_cache_${ctvId}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        callback(JSON.parse(cached));
+      } catch (e) {}
+    }
+
     const fetchStats = async () => {
       try {
         const res = await apiFetch(`/api/stats?ctvId=${ctvId}`);
         if (res.ok) {
           const stats = await res.json() as CTVStats;
+          localStorage.setItem(cacheKey, JSON.stringify(stats));
           callback(stats);
           return;
         }
       } catch (err) {
         // ignore
       }
-
-      // Fallback to local
-      const dbData = getLocalDb();
-      dbData.leads = dbData.leads || [];
-      dbData.users = dbData.users || [];
-
-      const ctv = dbData.users.find((u: any) => u.uid === ctvId);
-      if (!ctv) {
-        callback({
-          directSalesCount: 0,
-          f1SalesCount: 0,
-          directCommission: 0,
-          parentCommission: 0,
-          totalCommissionPaid: 0,
-          totalCommissionPending: 0,
-        });
-        return;
-      }
-
-      const f1Ctvs = dbData.users.filter((u: any) => u.referredByCode === ctv.referralCode);
-      const f1Uids = f1Ctvs.map((u: any) => u.uid);
-
-      const directLeads = dbData.leads.filter((l: any) => l.ctvId === ctvId);
-      const f1Leads = dbData.leads.filter((l: any) => f1Uids.includes(l.ctvId));
-
-      const directSalesCount = directLeads.filter((l: any) => l.status === 'chot_don').length;
-      const f1SalesCount = f1Leads.filter((l: any) => l.status === 'chot_don').length;
-
-      const directCommission = directLeads
-        .filter((l: any) => l.status === 'chot_don')
-        .reduce((sum: number, l: any) => sum + (l.commissionAmount || 0), 0);
-
-      const parentCommission = f1Leads
-        .filter((l: any) => l.status === 'chot_don')
-        .reduce((sum: number, l: any) => sum + (l.parentCommissionAmount || 0), 0);
-
-      let totalCommissionPaid = 0;
-      let totalCommissionPending = 0;
-
-      directLeads.filter((l: any) => l.status === 'chot_don').forEach((l: any) => {
-        if (l.isPaidCommission) {
-          totalCommissionPaid += l.commissionAmount || 0;
-        } else {
-          totalCommissionPending += l.commissionAmount || 0;
-        }
-      });
-
-      f1Leads.filter((l: any) => l.status === 'chot_don').forEach((l: any) => {
-        if (l.isPaidCommission) {
-          totalCommissionPaid += l.parentCommissionAmount || 0;
-        } else {
-          totalCommissionPending += l.parentCommissionAmount || 0;
-        }
-      });
-
-      callback({
-        directSalesCount,
-        f1SalesCount,
-        directCommission,
-        parentCommission,
-        totalCommissionPaid,
-        totalCommissionPending,
-      });
     };
 
     fetchStats();
