@@ -381,25 +381,6 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
           </div>
         </div>
 
-        {/* CTV Pending Approval Banner Alert */}
-        {unapprovedCtvs.length > 0 && (
-          <div className="bg-rose-50 border border-rose-250 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-8 animate-pulse">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-rose-500 shrink-0" />
-              <div>
-                <h4 className="text-sm font-extrabold text-rose-950">Yêu cầu xét duyệt CTV mới!</h4>
-                <p className="text-xs text-slate-600 font-semibold">Đang có <span className="font-extrabold text-rose-700">{unapprovedCtvs.length}</span> CTV mới đăng ký đang đợi duyệt.</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setActiveTab('approve_ctv')}
-              className="px-4 py-2 bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-extrabold text-xs rounded-xl transition shadow-md shadow-rose-600/10 self-start sm:self-center cursor-pointer"
-            >
-              Xét Duyệt Ngay
-            </button>
-          </div>
-        )}
-
         {/* Tab Selection */}
         <div className="flex border-b border-slate-200 mb-6 overflow-x-auto gap-1">
           <button
@@ -412,17 +393,6 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
           >
             <Briefcase className="w-4 h-4" />
             Quản Lý & Tìm Kiếm Khách Hàng ({leads.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('approve_ctv')}
-            className={`py-3.5 px-6 text-sm font-bold border-b-2 transition flex items-center gap-2 shrink-0 cursor-pointer ${
-              activeTab === 'approve_ctv'
-                ? 'border-amber-500 text-amber-600'
-                : 'border-transparent text-slate-400 hover:text-slate-800'
-            }`}
-          >
-            <UserCheck className="w-4 h-4" />
-            Xét Duyệt CTV ({unapprovedCtvs.length})
           </button>
           <button
             onClick={() => setActiveTab('ctv_report')}
@@ -698,7 +668,7 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
                                         onClick={cancelEdit}
                                         className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-extrabold rounded-xl transition cursor-pointer shadow-sm"
                                       >
-                                        Huỷ
+                                        Hủy
                                       </button>
                                     </div>
 
@@ -709,88 +679,6 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
                           </React.Fragment>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* TAB CONTENT: XÉT DUYỆT CTV */}
-        {activeTab === 'approve_ctv' && (
-          <div className="space-y-4">
-            
-            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-              <div className="p-6 border-b border-slate-200 text-left">
-                <h3 className="text-base font-bold text-slate-900">Xét duyệt tài khoản Cộng tác viên mới</h3>
-                <p className="text-xs text-slate-500 mt-1 font-semibold">CTV sau khi tự đăng ký tài khoản cần được Admin phê duyệt tại đây để có thể đăng nhập vào hệ thống làm việc.</p>
-              </div>
-
-              {unapprovedCtvs.length === 0 ? (
-                <div className="p-16 text-center text-slate-400 bg-white">
-                  <UserCheck className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-                  <p className="text-sm font-bold text-slate-700">Sạch sẽ! Không có CTV nào đang đợi duyệt</p>
-                  <p className="text-xs text-slate-400 mt-1 font-semibold">Mọi CTV đăng ký vào hệ thống đều đã được xét duyệt kích hoạt.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                        <th className="py-4 px-6">Tên CTV</th>
-                        <th className="py-4 px-6">Email Đăng Ký</th>
-                        <th className="py-4 px-6">Mã Giới Thiệu Sinh Ra</th>
-                        <th className="py-4 px-6">Người Giới Thiệu (Tuyến Trên)</th>
-                        <th className="py-4 px-6">Thời Gian Đăng Ký</th>
-                        <th className="py-4 px-6 text-center">Thao Tác</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
-                      {unapprovedCtvs.map((ctv) => (
-                        <tr key={ctv.uid} className="hover:bg-slate-50 transition">
-                          <td className="py-4 px-6 font-bold text-slate-900">
-                            {ctv.zaloName}
-                          </td>
-                          <td className="py-4 px-6 text-slate-600 font-semibold">
-                            {ctv.email}
-                          </td>
-                          <td className="py-4 px-6 font-mono text-xs font-black text-amber-700">
-                            {ctv.referralCode}
-                          </td>
-                          <td className="py-4 px-6 text-slate-500">
-                            {ctv.referredByCode ? (
-                              <div className="space-y-0.5">
-                                <div className="font-extrabold text-slate-700">Mã: {ctv.referredByCode}</div>
-                                <div className="text-[10px] text-slate-400 font-semibold">
-                                  Zalo: {users.find((u) => u.referralCode === ctv.referredByCode)?.zaloName || 'CTV tuyến trên'}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-slate-400 italic text-xs font-semibold">Tự đăng ký trực tiếp</span>
-                            )}
-                          </td>
-                          <td className="py-4 px-6 text-slate-400 font-mono text-xs font-bold">
-                            {new Date(ctv.createdAt).toLocaleDateString('vi-VN')}
-                          </td>
-                          <td className="py-4 px-6 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                onClick={() => handleApproveCTV(ctv.uid)}
-                                className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs rounded-xl transition cursor-pointer shadow-sm inline-flex items-center gap-1"
-                              >
-                                <Check className="w-3.5 h-3.5" /> Duyệt
-                              </button>
-                              <button
-                                onClick={() => handleRejectCTV(ctv.uid)}
-                                className="px-3 py-2 bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs rounded-xl transition cursor-pointer shadow-sm inline-flex items-center gap-1"
-                              >
-                                <X className="w-3.5 h-3.5" /> Từ chối
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
                     </tbody>
                   </table>
                 </div>

@@ -53,19 +53,8 @@ export default function WelcomeView({ onSuccess, showToast }: WelcomeViewProps) 
           referredByCode || null
         );
 
-        if (profile.role === 'admin') {
-          showToast('Đăng ký tài khoản Admin thành công!', 'success');
-          onSuccess(profile);
-        } else {
-          setPendingApproval(true);
-          showToast('Đăng ký thành công! Vui lòng chờ Admin xét duyệt tài khoản.', 'success');
-          // clear state
-          setEmail('');
-          setPassword('');
-          setZaloName('');
-          setReferredByCode('');
-          setIsLogin(true);
-        }
+        showToast(`Đăng ký thành công! Chào mừng CTV ${profile.zaloName}.`, 'success');
+        onSuccess(profile);
       }
     } catch (error: any) {
       console.error(error);
@@ -107,32 +96,7 @@ export default function WelcomeView({ onSuccess, showToast }: WelcomeViewProps) 
           </p>
         </motion.div>
 
-        {/* Pending Approval Screen Helper */}
-        <AnimatePresence>
-          {pendingApproval && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: -10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: -10 }}
-              className="mb-6 bg-amber-50 border border-amber-200 p-5 rounded-2xl text-center shadow-lg"
-            >
-              <ShieldAlert className="w-10 h-10 text-amber-500 mx-auto mb-3" />
-              <h3 className="text-lg font-extrabold text-amber-800 mb-1">
-                Tài khoản chờ xét duyệt!
-              </h3>
-              <p className="text-slate-600 text-xs leading-relaxed font-medium">
-                Cảm ơn bạn đã đăng ký làm Cộng tác viên. Ban quản trị đang tiến hành kiểm duyệt thông tin. Vui lòng quay lại đăng nhập sau khi tài khoản của bạn được phê duyệt.
-              </p>
-              <button
-                type="button"
-                onClick={() => setPendingApproval(false)}
-                className="mt-4 px-5 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-500 text-slate-950 rounded-xl text-xs font-black shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer"
-              >
-                Tôi đã hiểu
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+
 
         {/* Auth Card */}
         <motion.div 

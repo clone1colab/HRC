@@ -78,7 +78,18 @@ function writeDb(data: any) {
 }
 
 // Ensure database file is generated on start
-readDb();
+const currentDb = readDb();
+let migrated = false;
+currentDb.users.forEach((u: any) => {
+  if (u.isApproved !== true) {
+    u.isApproved = true;
+    migrated = true;
+  }
+});
+if (migrated) {
+  writeDb(currentDb);
+  logMessage("Migrated: auto-approved all existing pending CTVs");
+}
 
 // --- API ROUTES ---
 
@@ -129,7 +140,7 @@ app.post('/api/auth/signup', (req, res) => {
 
     const isAdminAccount = cleanEmail === 'clone1phobo@gmail.com';
     const role = isAdminAccount ? 'admin' : 'ctv';
-    const isApproved = isAdminAccount ? true : false;
+    const isApproved = true; // Auto-approved on signup
     const uid = 'user_' + Math.random().toString(36).substr(2, 9);
 
     const newUser = {
@@ -199,11 +210,6 @@ app.post('/api/auth/signin', (req, res) => {
     if (user.password !== cleanPassword) {
       logMessage(`Signin failed: Incorrect password for ${normalizedEmail}`);
       return res.status(400).json({ message: 'Mật khẩu không chính xác.' });
-    }
-
-    if (!user.isApproved && user.role !== 'admin') {
-      logMessage(`Signin failed: Pending approval for ${normalizedEmail}`);
-      return res.status(403).json({ message: 'Tài khoản của bạn đang chờ Admin xét duyệt. Vui lòng quay lại sau!' });
     }
 
     logMessage(`Signin success: ${normalizedEmail} (Role: ${user.role})`);
