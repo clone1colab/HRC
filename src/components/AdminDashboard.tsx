@@ -77,6 +77,16 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
     }
   };
 
+  // Reject a CTV account (Delete registration request)
+  const handleRejectCTV = async (uid: string) => {
+    try {
+      await dbService.rejectUser(uid);
+      showToast('Đã từ chối và xoá yêu cầu đăng ký của Cộng tác viên!', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Từ chối thất bại, vui lòng thử lại!', 'error');
+    }
+  };
+
   // Start editing a lead
   const startEditLead = (lead: Lead) => {
     setEditingLeadId(lead.id);
@@ -764,12 +774,20 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
                             {new Date(ctv.createdAt).toLocaleDateString('vi-VN')}
                           </td>
                           <td className="py-4 px-6 text-center">
-                            <button
-                              onClick={() => handleApproveCTV(ctv.uid)}
-                              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs rounded-xl transition cursor-pointer shadow-sm inline-flex items-center gap-1"
-                            >
-                              <Check className="w-3.5 h-3.5" /> Xét duyệt
-                            </button>
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => handleApproveCTV(ctv.uid)}
+                                className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs rounded-xl transition cursor-pointer shadow-sm inline-flex items-center gap-1"
+                              >
+                                <Check className="w-3.5 h-3.5" /> Duyệt
+                              </button>
+                              <button
+                                onClick={() => handleRejectCTV(ctv.uid)}
+                                className="px-3 py-2 bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-xs rounded-xl transition cursor-pointer shadow-sm inline-flex items-center gap-1"
+                              >
+                                <X className="w-3.5 h-3.5" /> Từ chối
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

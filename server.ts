@@ -256,6 +256,23 @@ app.post('/api/users/approve', (req, res) => {
   res.json({ success: true });
 });
 
+// 5b. Reject User (Delete from registration list)
+app.post('/api/users/reject', (req, res) => {
+  const { uid } = req.body;
+  if (!uid) {
+    return res.status(400).json({ message: 'Missing uid' });
+  }
+  const dbData = readDb();
+  const userIndex = dbData.users.findIndex((u: any) => u.uid === uid);
+  if (userIndex === -1) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  dbData.users.splice(userIndex, 1);
+  writeDb(dbData);
+  res.json({ success: true });
+});
+
 // 6. Get All Leads
 app.get('/api/leads', (req, res) => {
   const dbData = readDb();

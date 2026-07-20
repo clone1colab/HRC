@@ -394,6 +394,36 @@ export const dbService = {
     }
   },
 
+  // Reject a CTV account (Delete from registration list)
+  rejectUser: async (uid: string): Promise<void> => {
+    try {
+      const res = await apiFetch('/api/users/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid }),
+      });
+
+      if (res.ok) {
+        return;
+      }
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Không thể từ chối CTV.');
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ROUTE_NOT_FOUND_OR_UNREACHABLE') {
+        const dbData = getLocalDb();
+        const index = dbData.users.findIndex((u: any) => u.uid === uid);
+        if (index !== -1) {
+          dbData.users.splice(index, 1);
+          saveLocalDb(dbData);
+          return;
+        } else {
+          throw new Error('Không tìm thấy cộng tác viên.');
+        }
+      }
+      throw err;
+    }
+  },
+
   // Subscribe to Leads (Realtime Polling)
   subscribeLeads: (callback: (leads: Lead[]) => void) => {
     const fetchLeads = async () => {
