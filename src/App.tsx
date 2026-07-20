@@ -59,13 +59,13 @@ export default function App() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-900 font-sans">
         <div className="text-center space-y-4">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/20 mb-3 animate-bounce">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-500 text-slate-950 shadow-lg shadow-amber-500/30 mb-3 animate-pulse">
             <Sparkles className="w-7 h-7" />
           </div>
-          <h2 className="text-xl font-bold tracking-tight">Vui lòng đợi giây lát...</h2>
-          <p className="text-slate-500 text-xs font-medium">Đang đồng bộ dữ liệu bảo mật thời gian thực</p>
+          <h2 className="text-xl font-black tracking-tight text-slate-900">HManager đang tải...</h2>
+          <p className="text-slate-500 text-xs font-bold">Đồng bộ dữ liệu hệ thống thời gian thực</p>
           <div className="w-16 h-1 mx-auto bg-slate-200 rounded-full overflow-hidden mt-4">
-            <div className="h-full bg-blue-600 rounded-full w-[40%]" style={{ animation: 'progress 1.5s infinite ease-in-out' }} />
+            <div className="h-full bg-amber-500 rounded-full w-[40%] animate-pulse" />
           </div>
         </div>
       </div>
