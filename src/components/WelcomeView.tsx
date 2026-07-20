@@ -215,7 +215,7 @@ export default function WelcomeView({ onSuccess, showToast }: WelcomeViewProps) 
                   <Mail className="w-5 h-5" />
                 </span>
                 <input
-                  type="email"
+                  type="text"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}

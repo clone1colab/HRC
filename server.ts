@@ -60,12 +60,20 @@ function readDb() {
   }
 }
 
-// Write Database
+// Write Database (Atomic write using temp file to avoid corruption across devices)
 function writeDb(data: any) {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+    const tempFile = `${DB_FILE}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tempFile, DB_FILE);
   } catch (error) {
-    console.error('Error writing db file:', error);
+    console.error('Error writing db file atomically:', error);
+    // Fallback to direct write if renameSync fails
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (fallbackError) {
+      console.error('Critical: Fallback direct write failed:', fallbackError);
+    }
   }
 }
 
@@ -83,12 +91,15 @@ app.post('/api/auth/signup', (req, res) => {
       return res.status(400).json({ message: 'Vui lòng cung cấp đầy đủ thông tin.' });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+    const cleanZaloName = zaloName.trim();
     const cleanReferredCode = referredByCode?.trim() || null;
     const dbData = readDb();
 
     // Verify email uniqueness
-    if (dbData.users.some((u: any) => u.email === email.toLowerCase())) {
-      logMessage(`Signup failed: Email already registered: ${email}`);
+    if (dbData.users.some((u: any) => u.email === cleanEmail)) {
+      logMessage(`Signup failed: Email already registered: ${cleanEmail}`);
       return res.status(400).json({ message: 'Email đã được đăng ký trong hệ thống!' });
     }
 
@@ -111,16 +122,16 @@ app.post('/api/auth/signup', (req, res) => {
       attempts++;
     }
 
-    const isAdminAccount = email.toLowerCase() === 'clone1phobo@gmail.com';
+    const isAdminAccount = cleanEmail === 'clone1phobo@gmail.com';
     const role = isAdminAccount ? 'admin' : 'ctv';
     const isApproved = isAdminAccount ? true : false;
     const uid = 'user_' + Math.random().toString(36).substr(2, 9);
 
     const newUser = {
       uid,
-      email: email.toLowerCase(),
-      password,
-      zaloName,
+      email: cleanEmail,
+      password: cleanPassword,
+      zaloName: cleanZaloName,
       role,
       isApproved,
       referralCode,
@@ -131,7 +142,7 @@ app.post('/api/auth/signup', (req, res) => {
     dbData.users.push(newUser);
     writeDb(dbData);
 
-    logMessage(`Signup success: ${email} (UID: ${uid}, Role: ${role})`);
+    logMessage(`Signup success: ${cleanEmail} (UID: ${uid}, Role: ${role})`);
     const { password: _, ...profile } = newUser;
     res.json(profile);
   } catch (error: any) {
@@ -148,7 +159,8 @@ app.post('/api/auth/signin', (req, res) => {
       return res.status(400).json({ message: 'Vui lòng nhập email và mật khẩu.' });
     }
 
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
     const isAdminAccount = normalizedEmail === 'clone1phobo@gmail.com';
     const dbData = readDb();
 
@@ -156,13 +168,13 @@ app.post('/api/auth/signin', (req, res) => {
 
     if (!user) {
       // Auto-seed admin user if they are logging in for the first time
-      if (isAdminAccount && password === 'nguyen2000') {
+      if (isAdminAccount && cleanPassword === 'nguyen2000') {
         const referralCode = '123456';
         const uid = 'admin_default_uid';
         user = {
           uid,
           email: normalizedEmail,
-          password,
+          password: cleanPassword,
           zaloName: 'Lê Đức Nguyên',
           role: 'admin',
           isApproved: true,
@@ -179,7 +191,7 @@ app.post('/api/auth/signin', (req, res) => {
       }
     }
 
-    if (user.password !== password) {
+    if (user.password !== cleanPassword) {
       logMessage(`Signin failed: Incorrect password for ${normalizedEmail}`);
       return res.status(400).json({ message: 'Mật khẩu không chính xác.' });
     }
@@ -371,6 +383,12 @@ app.get('/api/stats', (req, res) => {
     totalCommissionPaid,
     totalCommissionPending,
   });
+});
+
+// Fallback for unmatched API routes to prevent HTML response
+app.use('/api/*', (req, res) => {
+  logMessage(`API Route Not Found: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ message: 'User not found' }); // Use generic or 'User not found' if they hit a stale watch URL
 });
 
 // --- VITE MIDDLEWARE SETUP ---

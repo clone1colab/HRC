@@ -76,6 +76,28 @@
       "referralCode": "792238",
       "referredByCode": null,
       "createdAt": "2026-07-20T11:21:03.914Z"
+    },
+    {
+      "uid": "user_5v4t9bfsv",
+      "email": "test404@gmail.com",
+      "password": "password123",
+      "zaloName": "Test 404",
+      "role": "ctv",
+      "isApproved": false,
+      "referralCode": "545719",
+      "referredByCode": null,
+      "createdAt": "2026-07-20T11:28:11.318Z"
+    },
+    {
+      "uid": "user_bu5l58ygc",
+      "email": "testnewregister@gmail.com",
+      "password": "myPassword123",
+      "zaloName": "My Zalo Name",
+      "role": "ctv",
+      "isApproved": false,
+      "referralCode": "999030",
+      "referredByCode": null,
+      "createdAt": "2026-07-20T11:31:55.903Z"
     }
   ],
   "leads": []

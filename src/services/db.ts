@@ -97,9 +97,19 @@ export const authService = {
           localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(freshUser));
           callback(freshUser);
         } else if (res.status === 404) {
-          // If user deleted from database, sign out
-          localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
-          callback(null);
+          // Verify if it is indeed an explicit "User not found" response from our server
+          try {
+            const data = await res.json();
+            if (data && (data.message === 'User not found' || data.message === 'User has been deleted')) {
+              localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+              callback(null);
+            } else {
+              callback(cachedUser);
+            }
+          } catch (e) {
+            // Transient load balancer or server 404, keep session active
+            callback(cachedUser);
+          }
         } else {
           // If server is temporarily unreachable, fall back to cached user profile
           callback(cachedUser);
