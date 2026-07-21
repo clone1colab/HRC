@@ -20,16 +20,6 @@ function getLocalDb(): LocalDb {
     try {
       const parsed = JSON.parse(stored);
       if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.leads)) {
-        let changed = false;
-        parsed.users.forEach((u: any) => {
-          if (u.isApproved !== true) {
-            u.isApproved = true;
-            changed = true;
-          }
-        });
-        if (changed) {
-          localStorage.setItem(STORAGE_LOCAL_DB_KEY, JSON.stringify(parsed));
-        }
         return parsed;
       }
     } catch (e) {
@@ -67,12 +57,20 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<Respon
   const attempts = 3;
   let delay = 1000;
 
+  // Append cache buster to GET requests to prevent any aggressive browser/CDN caching
+  const method = options.method || 'GET';
+  let finalPath = path;
+  if (method.toUpperCase() === 'GET') {
+    const buster = `_t=${Date.now()}`;
+    finalPath = path.includes('?') ? `${path}&${buster}` : `${path}?${buster}`;
+  }
+
   for (let i = 0; i < attempts; i++) {
     try {
-      const response = await fetch(path, options);
+      const response = await fetch(finalPath, options);
       // If we receive ANY response from the server (even a 404, 500, or validation error),
       // and it's an API route, return it immediately. The API server is up and functioning.
-      if (response.status !== 404 || path.startsWith('/api/')) {
+      if (response.status !== 404 || finalPath.startsWith('/api/')) {
         return response;
       }
     } catch (err) {
@@ -87,9 +85,9 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<Respon
 
   // Fallback to localhost:3000 as a helper ONLY for local dev environments where frontend/backend might be on different ports
   try {
-    const absoluteUrl = `http://localhost:3000${path}`;
+    const absoluteUrl = `http://localhost:3000${finalPath}`;
     const response = await fetch(absoluteUrl, options);
-    if (response.status !== 404 || path.startsWith('/api/')) {
+    if (response.status !== 404 || finalPath.startsWith('/api/')) {
       return response;
     }
   } catch (err) {
@@ -637,7 +635,7 @@ export const dbService = {
     };
 
     fetchUsers();
-    const interval = setInterval(fetchUsers, 3000);
+    const interval = setInterval(fetchUsers, 2000);
     return () => {
       userListeners = userListeners.filter((cb) => cb !== callback);
       clearInterval(interval);
@@ -751,7 +749,7 @@ export const dbService = {
     };
 
     fetchLeads();
-    const interval = setInterval(fetchLeads, 3000);
+    const interval = setInterval(fetchLeads, 2000);
     return () => {
       leadListeners = leadListeners.filter((cb) => cb !== callback);
       clearInterval(interval);
@@ -952,7 +950,7 @@ export const dbService = {
     const listenerItem = { ctvId, callback, fetchStats };
     statsListeners.push(listenerItem);
 
-    const interval = setInterval(fetchStats, 3000);
+    const interval = setInterval(fetchStats, 2000);
     return () => {
       statsListeners = statsListeners.filter((item) => item !== listenerItem);
       clearInterval(interval);
