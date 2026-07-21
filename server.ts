@@ -2,11 +2,44 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import { createServer } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
 
 const app = express();
 const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), 'db.json');
 const LOG_FILE = path.join(process.cwd(), 'server.log');
+
+const server = createServer(app);
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+wss.on('connection', (ws) => {
+  logMessage('New WebSocket connection established.');
+  
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message.toString());
+      if (data.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
+      }
+    } catch (err) {
+      // ignore
+    }
+  });
+
+  ws.on('close', () => {
+    logMessage('WebSocket connection closed.');
+  });
+});
+
+function broadcast(payload: any) {
+  const message = JSON.stringify(payload);
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
 
 app.use(express.json());
 
@@ -160,6 +193,15 @@ app.post('/api/auth/signup', (req, res) => {
 
     logMessage(`Signup success: ${cleanEmail} (UID: ${uid}, Role: ${role})`);
     const { password: _, ...profile } = newUser;
+
+    // Real-time broadcast
+    const cleanUsers = dbData.users.map(({ password: _, ...u }: any) => u);
+    broadcast({
+      type: 'user_registered',
+      user: profile,
+      users: cleanUsers
+    });
+
     res.json(profile);
   } catch (error: any) {
     logMessage(`CRITICAL error in signup: ${error.stack || error.message}`);
@@ -259,6 +301,14 @@ app.post('/api/users/approve', (req, res) => {
 
   user.isApproved = true;
   writeDb(dbData);
+
+  const cleanUsers = dbData.users.map(({ password: _, ...u }: any) => u);
+  broadcast({
+    type: 'user_approved',
+    uid,
+    users: cleanUsers
+  });
+
   res.json({ success: true });
 });
 
@@ -276,6 +326,14 @@ app.post('/api/users/reject', (req, res) => {
 
   dbData.users.splice(userIndex, 1);
   writeDb(dbData);
+
+  const cleanUsers = dbData.users.map(({ password: _, ...u }: any) => u);
+  broadcast({
+    type: 'user_rejected',
+    uid,
+    users: cleanUsers
+  });
+
   res.json({ success: true });
 });
 
@@ -288,6 +346,7 @@ app.get('/api/leads', (req, res) => {
   res.json(sorted);
 });
 
+// 7. Add Lead
 // 7. Add Lead
 app.post('/api/leads', (req, res) => {
   const { customerName, customerPhone, note, ctvUser } = req.body;
@@ -326,6 +385,12 @@ app.post('/api/leads', (req, res) => {
   dbData.leads.push(newLead);
   writeDb(dbData);
 
+  broadcast({
+    type: 'lead_added',
+    lead: newLead,
+    leads: dbData.leads
+  });
+
   res.json(newLead);
 });
 
@@ -350,6 +415,14 @@ app.put('/api/leads/:id', (req, res) => {
   };
 
   writeDb(dbData);
+
+  broadcast({
+    type: 'lead_updated',
+    leadId,
+    lead: dbData.leads[leadIndex],
+    leads: dbData.leads
+  });
+
   res.json({ success: true });
 });
 
@@ -478,11 +551,19 @@ app.post('/api/sync', (req, res) => {
     if (updated) {
       writeDb(dbData);
       logMessage(`Database synchronized: ${dbData.users.length} users, ${dbData.leads.length} leads in total.`);
+
+      const cleanUsers = dbData.users.map(({ password: _, ...u }: any) => u);
+      broadcast({
+        type: 'db_synced',
+        users: cleanUsers,
+        leads: dbData.leads
+      });
     }
 
+    const cleanUsers = dbData.users.map(({ password: _, ...u }: any) => u);
     res.json({
       success: true,
-      users: dbData.users,
+      users: cleanUsers,
       leads: dbData.leads
     });
   } catch (error: any) {
@@ -513,7 +594,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`[HManager Server] running on http://localhost:${PORT}`);
   });
 }

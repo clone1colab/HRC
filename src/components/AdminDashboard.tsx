@@ -198,11 +198,13 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
   const chuaCheckCount = leads.filter((l) => l.status === 'chua_check').length;
   const daCheckCount = leads.filter((l) => l.status === 'da_check').length;
   const chotDonCount = leads.filter((l) => l.status === 'chot_don').length;
+  const khongChotCount = leads.filter((l) => l.status === 'khong_chot').length;
 
   const leadStatusData = [
     { name: 'Chưa check', value: chuaCheckCount, color: '#f59e0b' },  // Gold
     { name: 'Đang check', value: daCheckCount, color: '#3b82f6' },    // Blue
     { name: 'Đã chốt đơn', value: chotDonCount, color: '#10b981' },  // Emerald
+    { name: 'Không chốt được', value: khongChotCount, color: '#f43f5e' }, // Rose
   ].filter((item) => item.value > 0);
 
   const commissionStructureData = [
@@ -437,6 +439,7 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
                   <option value="chua_check">Chưa check</option>
                   <option value="da_check">Đang check</option>
                   <option value="chot_don">Đã chốt đơn</option>
+                  <option value="khong_chot">Không chốt được (Từ chối)</option>
                 </select>
 
                 <select
@@ -526,6 +529,11 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
                                     Đã check
                                   </span>
                                 )}
+                                {lead.status === 'khong_chot' && (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                    Không chốt được (Từ chối)
+                                  </span>
+                                )}
                                 {lead.status === 'chot_don' && (
                                   <div className="space-y-1">
                                     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -601,6 +609,7 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
                                           <option value="chua_check">Chưa check</option>
                                           <option value="da_check">Đã check</option>
                                           <option value="chot_don">Đã chốt đơn</option>
+                                          <option value="khong_chot">Không chốt được (Từ chối)</option>
                                         </select>
                                       </div>
 

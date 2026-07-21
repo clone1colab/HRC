@@ -23,6 +23,7 @@ import {
   BookOpen,
   PieChart as ChartIcon,
   HelpCircle,
+  X,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
@@ -51,7 +52,7 @@ export default function CtvDashboard({ user, onLogout, showToast }: CtvDashboard
 
   // Search/Filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'chua_check' | 'da_check' | 'chot_don'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'chua_check' | 'da_check' | 'chot_don' | 'khong_chot'>('all');
 
   // New lead form state
   const [customerName, setCustomerName] = useState('');
@@ -172,6 +173,12 @@ export default function CtvDashboard({ user, onLogout, showToast }: CtvDashboard
             <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> Đã chốt đơn
           </span>
         );
+      case 'khong_chot':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-100">
+            <X className="w-3.5 h-3.5 text-rose-500" /> Không chốt được (Từ chối)
+          </span>
+        );
       default:
         return null;
     }
@@ -201,11 +208,13 @@ export default function CtvDashboard({ user, onLogout, showToast }: CtvDashboard
   const chuaCheckCount = myLeads.filter((l) => l.status === 'chua_check').length;
   const daCheckCount = myLeads.filter((l) => l.status === 'da_check').length;
   const chotDonCount = myLeads.filter((l) => l.status === 'chot_don').length;
+  const khongChotCount = myLeads.filter((l) => l.status === 'khong_chot').length;
 
   const leadStatusData = [
     { name: 'Chưa check', value: chuaCheckCount, color: '#f59e0b' },  // Amber/Gold
     { name: 'Đang check', value: daCheckCount, color: '#3b82f6' },    // Blue
     { name: 'Đã chốt', value: chotDonCount, color: '#10b981' },       // Emerald
+    { name: 'Không chốt', value: khongChotCount, color: '#f43f5e' },   // Rose
   ].filter((item) => item.value > 0);
 
   const totalClosedCommission = stats.directCommission + stats.parentCommission;
@@ -619,6 +628,7 @@ export default function CtvDashboard({ user, onLogout, showToast }: CtvDashboard
                       <option value="chua_check">Chưa check</option>
                       <option value="da_check">Đang check</option>
                       <option value="chot_don">Đã chốt đơn</option>
+                      <option value="khong_chot">Không chốt được / Từ chối</option>
                     </select>
                   </div>
 

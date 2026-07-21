@@ -101,6 +101,157 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<Respon
 }
 
 // --- LOCAL DB FALLBACK IMPLEMENTATIONS ---
+let leadListeners: ((leads: Lead[]) => void)[] = [];
+const notifyLeadListeners = (leads: Lead[]) => {
+  leadListeners.forEach((cb) => cb(leads));
+};
+
+let userListeners: ((users: UserProfile[]) => void)[] = [];
+const notifyUserListeners = (users: UserProfile[]) => {
+  userListeners.forEach((cb) => cb(users));
+};
+
+interface StatsListener {
+  ctvId: string;
+  callback: (stats: CTVStats) => void;
+  fetchStats: () => void;
+}
+let statsListeners: StatsListener[] = [];
+
+// Helper functions for WS
+const getWsProtocol = () => {
+  return window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+};
+
+const getWsUrl = () => {
+  const protocol = getWsProtocol();
+  const host = window.location.host;
+  return `${protocol}//${host}/ws`;
+};
+
+// WebSocket Client Manager for Real-Time Synchronization
+class WSClient {
+  private ws: WebSocket | null = null;
+  private reconnectTimer: any = null;
+  private pingTimer: any = null;
+  private url: string = '';
+
+  constructor() {
+    this.url = getWsUrl();
+  }
+
+  connect() {
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      return;
+    }
+
+    try {
+      this.ws = new WebSocket(this.url);
+      
+      this.ws.onopen = () => {
+        console.log('[WS] Connected to real-time sync server.');
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+        this.startPing();
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleMessage(data);
+        } catch (e) {
+          console.error('[WS] Error processing message:', e);
+        }
+      };
+
+      this.ws.onclose = (event) => {
+        console.warn('[WS] Connection closed:', event.reason);
+        this.stopPing();
+        this.scheduleReconnect();
+      };
+
+      this.ws.onerror = (err) => {
+        console.error('[WS] Connection error:', err);
+        this.ws?.close();
+      };
+    } catch (err) {
+      console.error('[WS] Failed to connect:', err);
+      this.scheduleReconnect();
+    }
+  }
+
+  private startPing() {
+    this.stopPing();
+    this.pingTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 20000);
+  }
+
+  private stopPing() {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      console.log('[WS] Attempting to reconnect...');
+      this.connect();
+    }, 2000);
+  }
+
+  private handleMessage(data: any) {
+    if (data.type === 'pong') return;
+
+    console.log('[WS] Received real-time update event:', data.type);
+
+    if (data.users) {
+      localStorage.setItem('lead_ctv_users_cache', JSON.stringify(data.users));
+      notifyUserListeners(data.users);
+      
+      const dbData = getLocalDb();
+      dbData.users = data.users;
+      saveLocalDb(dbData);
+    }
+
+    if (data.leads) {
+      localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(data.leads));
+      notifyLeadListeners(data.leads);
+
+      statsListeners.forEach((item) => {
+        item.fetchStats();
+      });
+
+      const dbData = getLocalDb();
+      dbData.leads = data.leads;
+      saveLocalDb(dbData);
+    }
+    
+    // Broadcast Custom Event for UI notifications
+    if (data.type === 'user_registered') {
+      const event = new CustomEvent('realtime:user_registered', { detail: data.user });
+      window.dispatchEvent(event);
+    } else if (data.type === 'lead_added') {
+      const event = new CustomEvent('realtime:lead_added', { detail: data.lead });
+      window.dispatchEvent(event);
+    } else if (data.type === 'lead_updated') {
+      const event = new CustomEvent('realtime:lead_updated', { detail: data });
+      window.dispatchEvent(event);
+    }
+  }
+}
+
+const wsClient = typeof window !== 'undefined' ? new WSClient() : null;
+if (wsClient) {
+  wsClient.connect();
+}
 const signUpLocal = async (email: string, password: string, zaloName: string, referredByCode: string | null): Promise<UserProfile> => {
   const cleanEmail = email.trim().toLowerCase();
   const cleanPassword = password.trim();
@@ -459,11 +610,16 @@ export const dbService = {
 
   // Subscribe to Users list (Realtime Polling)
   subscribeUsers: (callback: (users: UserProfile[]) => void) => {
+    userListeners.push(callback);
+
     const cached = localStorage.getItem('lead_ctv_users_cache');
     if (cached) {
       try {
         callback(JSON.parse(cached));
       } catch (e) {}
+    } else {
+      const localUsers = getLocalDb().users || [];
+      callback(localUsers);
     }
 
     const fetchUsers = async () => {
@@ -472,7 +628,7 @@ export const dbService = {
         if (res.ok) {
           const users = await res.json() as UserProfile[];
           localStorage.setItem('lead_ctv_users_cache', JSON.stringify(users));
-          callback(users);
+          notifyUserListeners(users);
           return;
         }
       } catch (err) {
@@ -483,6 +639,7 @@ export const dbService = {
     fetchUsers();
     const interval = setInterval(fetchUsers, 3000);
     return () => {
+      userListeners = userListeners.filter((cb) => cb !== callback);
       clearInterval(interval);
     };
   },
@@ -567,11 +724,16 @@ export const dbService = {
 
   // Subscribe to Leads (Realtime Polling)
   subscribeLeads: (callback: (leads: Lead[]) => void) => {
+    leadListeners.push(callback);
+
     const cached = localStorage.getItem('lead_ctv_leads_cache');
     if (cached) {
       try {
         callback(JSON.parse(cached));
       } catch (e) {}
+    } else {
+      const localLeads = getLocalDb().leads || [];
+      callback(localLeads);
     }
 
     const fetchLeads = async () => {
@@ -580,7 +742,7 @@ export const dbService = {
         if (res.ok) {
           const leads = await res.json() as Lead[];
           localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(leads));
-          callback(leads);
+          notifyLeadListeners(leads);
           return;
         }
       } catch (err) {
@@ -591,6 +753,7 @@ export const dbService = {
     fetchLeads();
     const interval = setInterval(fetchLeads, 3000);
     return () => {
+      leadListeners = leadListeners.filter((cb) => cb !== callback);
       clearInterval(interval);
     };
   },
@@ -617,6 +780,19 @@ export const dbService = {
           dbData.leads.push(lead);
           saveLocalDb(dbData);
         }
+
+        // Update cache instantly and notify listeners!
+        const cached = localStorage.getItem('lead_ctv_leads_cache');
+        let currentLeads: Lead[] = [];
+        if (cached) {
+          try { currentLeads = JSON.parse(cached); } catch (e) {}
+        }
+        if (!currentLeads.some((l) => l.id === lead.id)) {
+          currentLeads = [lead, ...currentLeads];
+          localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(currentLeads));
+          notifyLeadListeners(currentLeads);
+        }
+
         dbService.syncDatabase().catch(() => {});
         return lead;
       }
@@ -645,6 +821,19 @@ export const dbService = {
         dbData.leads = dbData.leads || [];
         dbData.leads.push(localLead);
         saveLocalDb(dbData);
+
+        // Update cache and notify
+        const cached = localStorage.getItem('lead_ctv_leads_cache');
+        let currentLeads: Lead[] = [];
+        if (cached) {
+          try { currentLeads = JSON.parse(cached); } catch (e) {}
+        }
+        if (!currentLeads.some((l) => l.id === localLead.id)) {
+          currentLeads = [localLead, ...currentLeads];
+          localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(currentLeads));
+          notifyLeadListeners(currentLeads);
+        }
+
         dbService.syncDatabase().catch(() => {});
         return localLead;
       } catch (localErr) {
@@ -676,6 +865,21 @@ export const dbService = {
           dbData.leads[idx] = { ...dbData.leads[idx], ...updates };
           saveLocalDb(dbData);
         }
+
+        // Update cached leads and notify
+        const cachedStr = localStorage.getItem('lead_ctv_leads_cache');
+        if (cachedStr) {
+          try {
+            const currentLeads: Lead[] = JSON.parse(cachedStr);
+            const cachedIdx = currentLeads.findIndex((l) => l.id === leadId);
+            if (cachedIdx !== -1) {
+              currentLeads[cachedIdx] = { ...currentLeads[cachedIdx], ...updates };
+              localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(currentLeads));
+              notifyLeadListeners(currentLeads);
+            }
+          } catch (e) {}
+        }
+
         dbService.syncDatabase().catch(() => {});
         return;
       }
@@ -690,6 +894,21 @@ export const dbService = {
         if (idx !== -1) {
           dbData.leads[idx] = { ...dbData.leads[idx], ...updates };
           saveLocalDb(dbData);
+
+          // Update cached leads and notify
+          const cachedStr = localStorage.getItem('lead_ctv_leads_cache');
+          if (cachedStr) {
+            try {
+              const currentLeads: Lead[] = JSON.parse(cachedStr);
+              const cachedIdx = currentLeads.findIndex((l) => l.id === leadId);
+              if (cachedIdx !== -1) {
+                currentLeads[cachedIdx] = { ...currentLeads[cachedIdx], ...updates };
+                localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(currentLeads));
+                notifyLeadListeners(currentLeads);
+              }
+            } catch (e) {}
+          }
+
           dbService.syncDatabase().catch(() => {});
           return;
         }
@@ -729,8 +948,13 @@ export const dbService = {
     };
 
     fetchStats();
+    
+    const listenerItem = { ctvId, callback, fetchStats };
+    statsListeners.push(listenerItem);
+
     const interval = setInterval(fetchStats, 3000);
     return () => {
+      statsListeners = statsListeners.filter((item) => item !== listenerItem);
       clearInterval(interval);
     };
   },

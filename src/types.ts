@@ -14,7 +14,7 @@ export interface UserProfile {
   createdAt: any; // Date, string, or Firestore Timestamp
 }
 
-export type LeadStatus = 'chua_check' | 'da_check' | 'chot_don';
+export type LeadStatus = 'chua_check' | 'da_check' | 'chot_don' | 'khong_chot';
 
 export interface Lead {
   id: string;

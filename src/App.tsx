@@ -99,6 +99,62 @@ export default function App() {
     };
   }, []);
 
+  // Listen for real-time WebSocket events to show toasts/notifications
+  useEffect(() => {
+    const handleUserRegistered = (e: Event) => {
+      const user = (e as CustomEvent).detail;
+      if (currentUser && currentUser.uid !== user.uid) {
+        showToast(`🎉 CTV mới đăng ký thành công: ${user.zaloName} (${user.email})!`, 'success');
+      }
+    };
+
+    const handleLeadAdded = (e: Event) => {
+      const lead = (e as CustomEvent).detail;
+      if (currentUser) {
+        if (currentUser.role === 'admin') {
+          showToast(`📥 Khách hàng mới từ CTV ${lead.ctvZaloName}: ${lead.customerName}!`, 'info');
+        } else if (currentUser.uid === lead.parentCtvId) {
+          showToast(`💸 CTV cấp dưới (${lead.ctvZaloName}) vừa thêm khách hàng mới: ${lead.customerName}!`, 'info');
+        }
+      }
+    };
+
+    const handleLeadUpdated = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const lead = detail.lead;
+      if (currentUser) {
+        // If current CTV is the creator of the lead, and status changed
+        if (currentUser.uid === lead.ctvId) {
+          if (lead.status === 'da_check') {
+            showToast(`⚙️ Khách hàng ${lead.customerName} của bạn đã chuyển sang "Đang check"!`, 'info');
+          } else if (lead.status === 'chot_don') {
+            showToast(`🥳 Chúc mừng! Khách hàng ${lead.customerName} của bạn đã được CHỐT ĐƠN thành công!`, 'success');
+          } else if (lead.status === 'khong_chot') {
+            showToast(`❌ Khách hàng ${lead.customerName} của bạn đã không chốt được hoặc bị từ chối.`, 'error');
+          }
+        }
+        // If current CTV is the parent/sponsor, and status was closed
+        else if (currentUser.uid === lead.parentCtvId && lead.status === 'chot_don') {
+          showToast(`💰 Nhận hoa hồng F1! Khách hàng ${lead.customerName} của CTV cấp dưới (${lead.ctvZaloName}) đã chốt đơn!`, 'success');
+        }
+        // If admin updated lead
+        else if (currentUser.role === 'admin') {
+          showToast(`✏️ Cập nhật trạng thái khách hàng ${lead.customerName} thành công!`, 'success');
+        }
+      }
+    };
+
+    window.addEventListener('realtime:user_registered', handleUserRegistered);
+    window.addEventListener('realtime:lead_added', handleLeadAdded);
+    window.addEventListener('realtime:lead_updated', handleLeadUpdated);
+
+    return () => {
+      window.removeEventListener('realtime:user_registered', handleUserRegistered);
+      window.removeEventListener('realtime:lead_added', handleLeadAdded);
+      window.removeEventListener('realtime:lead_updated', handleLeadUpdated);
+    };
+  }, [currentUser]);
+
   // Logout wrapper
   const handleLogout = async () => {
     try {
