@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { authService } from './services/db';
+import { authService, dbService } from './services/db';
 import { UserProfile } from './types';
 import WelcomeView from './components/WelcomeView';
 import CtvDashboard from './components/CtvDashboard';
@@ -31,22 +31,22 @@ export default function App() {
     setToast(null);
   };
 
-  // Subscribe to real-time auth changes
+  // Subscribe to real-time auth changes & manage background synchronization
   useEffect(() => {
-    // Force approve any cached users in browser localStorage so they never get stuck on old data
+    // 1. Force approve any cached users in browser localStorage so they never get stuck on old data
     try {
-      // 1. Current user session cache
-      const currentUserStr = localStorage.getItem('lead_ctv_current_user');
+      // Current user session cache
+      const currentUserStr = localStorage.getItem('ctv_lead_current_user');
       if (currentUserStr) {
         const u = JSON.parse(currentUserStr);
         if (u && u.isApproved !== true) {
           u.isApproved = true;
-          localStorage.setItem('lead_ctv_current_user', JSON.stringify(u));
+          localStorage.setItem('ctv_lead_current_user', JSON.stringify(u));
         }
       }
 
-      // 2. Local fallback database cache
-      const localDbStr = localStorage.getItem('lead_ctv_local_db');
+      // Local fallback database cache
+      const localDbStr = localStorage.getItem('ctv_lead_local_db');
       if (localDbStr) {
         const db = JSON.parse(localDbStr);
         if (db && Array.isArray(db.users)) {
@@ -58,12 +58,12 @@ export default function App() {
             }
           });
           if (updated) {
-            localStorage.setItem('lead_ctv_local_db', JSON.stringify(db));
+            localStorage.setItem('ctv_lead_local_db', JSON.stringify(db));
           }
         }
       }
 
-      // 3. User lists cache
+      // User lists cache
       const usersCacheStr = localStorage.getItem('lead_ctv_users_cache');
       if (usersCacheStr) {
         const users = JSON.parse(usersCacheStr);
@@ -84,6 +84,17 @@ export default function App() {
       console.warn('Silent local cache approval failed:', e);
     }
 
+    // 2. Perform initial background synchronization on load to recover any offline/unsynced registrations
+    dbService.syncDatabase().catch((e) => {
+      console.warn('Initial database sync failed/offline:', e);
+    });
+
+    // 3. Set up a periodic background synchronizer every 15 seconds to ensure robust, auto-recovering synchronization
+    const syncInterval = setInterval(() => {
+      dbService.syncDatabase().catch(() => {});
+    }, 15000);
+
+    // 4. Subscribe to auth state
     const unsubscribe = authService.onAuthStateChanged((user) => {
       // If the user is logged in, ensure we force isApproved to true just in case
       if (user && user.isApproved !== true) {
@@ -92,7 +103,9 @@ export default function App() {
       setCurrentUser(user);
       setAuthChecking(false);
     });
+
     return () => {
+      clearInterval(syncInterval);
       if (typeof unsubscribe === 'function') {
         unsubscribe();
       }

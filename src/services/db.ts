@@ -440,6 +440,7 @@ export const authService = {
 
       if (response.ok) {
         const profile = await response.json() as UserProfile;
+        localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
         const dbData = getLocalDb();
         if (!dbData.users.some((u: any) => u.uid === profile.uid)) {
           dbData.users.push({ ...profile, password });
@@ -453,6 +454,7 @@ export const authService = {
       try {
         const localProfile = await signUpLocal(email, password, zaloName, referredByCodeInput);
         if (localProfile) {
+          localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(localProfile));
           dbService.syncDatabase().catch(() => {});
           return localProfile;
         }
@@ -479,6 +481,7 @@ export const authService = {
       try {
         const localProfile = await signUpLocal(email, password, zaloName, referredByCodeInput);
         if (localProfile) {
+          localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(localProfile));
           dbService.syncDatabase().catch(() => {});
           return localProfile;
         }
