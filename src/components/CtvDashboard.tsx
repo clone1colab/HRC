@@ -280,27 +280,17 @@ export default function CtvDashboard({ user, onLogout, showToast }: CtvDashboard
       </header>
 
       <main className="max-w-7xl mx-auto px-6 mt-8">
-        {!isUsingRealFirebase ? (
-          <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm animate-fade-in">
-            <Check className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-amber-800">Cơ sở dữ liệu đang ở chế độ Sandbox (Không đồng bộ đa thiết bị)</h4>
-              <p className="text-xs text-amber-700 leading-relaxed">
-                Để hệ thống hoạt động đồng bộ hóa dữ liệu thời gian thực và lưu trữ vĩnh viễn trên nhiều thiết bị (Cloud Run), vui lòng nhờ Admin thiết lập cấu hình Firebase nhé!
-              </p>
-            </div>
+        <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm animate-fade-in">
+          <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="text-sm font-bold text-emerald-800">
+              Đã kích hoạt đồng bộ hóa đám mây thời gian thực ({isUsingRealFirebase ? 'Firebase Firestore' : 'Cloud Server & WebSockets'})
+            </h4>
+            <p className="text-xs text-emerald-700 leading-relaxed">
+              Cơ sở dữ liệu của bạn đang được đồng bộ hóa trực tiếp trên đám mây trong thời gian thực. Mọi thông tin gửi khách hàng và cập nhật doanh thu sẽ tự động đồng bộ tức thì trên thiết bị của bạn và Admin!
+            </p>
           </div>
-        ) : (
-          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm animate-fade-in">
-            <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-emerald-800">Đã kích hoạt đồng bộ hóa đám mây thời gian thực (Firebase Firestore)</h4>
-              <p className="text-xs text-emerald-700 leading-relaxed">
-                Cơ sở dữ liệu của bạn đang được đồng bộ hóa trực tiếp trên đám mây trong thời gian thực. Mọi thông tin gửi khách hàng và cập nhật doanh thu sẽ tự động đồng bộ tức thì trên thiết bị của Admin và của bạn!
-              </p>
-            </div>
-          </div>
-        )}
+        </div>
 
         {/* Referral Link Box */}
         <motion.div 
