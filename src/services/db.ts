@@ -228,6 +228,44 @@ class WSClient {
 
     console.log('[WS] Received real-time update event:', data.type);
 
+    if (data.type === 'db_reset') {
+      console.warn('[WS] Database reset requested by admin. Purging all local caches...');
+      localStorage.removeItem('ctv_lead_db_version');
+      localStorage.removeItem('lead_ctv_users_cache');
+      localStorage.removeItem('lead_ctv_leads_cache');
+      
+      const resetDb: LocalDb = {
+        users: data.users || [],
+        leads: data.leads || []
+      };
+      saveLocalDb(resetDb);
+      if (data.dbVersion) {
+        localStorage.setItem('ctv_lead_db_version', data.dbVersion);
+      }
+
+      notifyUserListeners(resetDb.users);
+      notifyLeadListeners(resetDb.leads);
+
+      // Log out non-admin users whose profile is no longer present
+      const stored = localStorage.getItem(STORAGE_CURRENT_USER_KEY);
+      if (stored) {
+        try {
+          const cachedUser = JSON.parse(stored) as UserProfile;
+          const stillExists = resetDb.users.some((u: any) => u.uid === cachedUser.uid);
+          if (!stillExists && cachedUser.email !== 'clone1phobo@gmail.com') {
+            console.warn('[WS] Session expired or revoked by reset. Logging out.');
+            localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+            window.location.reload();
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('realtime:db_reset'));
+      return;
+    }
+
     if (data.users) {
       localStorage.setItem('lead_ctv_users_cache', JSON.stringify(data.users));
       notifyUserListeners(data.users);
@@ -766,36 +804,92 @@ const calculateCTVStatsLocal = (ctvId: string, leads: Lead[]): CTVStats => {
 
 // --- DATA SERVICE ---
 export const dbService = {
+  // Reset database on server (Admin only)
+  resetDatabase: async (adminEmail: string): Promise<boolean> => {
+    try {
+      const res = await apiFetch('/api/admin/reset-database', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminEmail })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.success === true;
+      }
+      return false;
+    } catch (e) {
+      console.error('[Reset] Failed to request database reset:', e);
+      throw e;
+    }
+  },
+
   // Synchronize client LocalStorage database with server database
   syncDatabase: async (): Promise<void> => {
     if (isUsingRealFirebase) return; // Not needed with direct Firebase synchronization
 
     try {
       const dbData = getLocalDb();
+      const clientDbVersion = localStorage.getItem('ctv_lead_db_version') || 'v_init';
+
       const res = await apiFetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           users: dbData.users,
-          leads: dbData.leads
+          leads: dbData.leads,
+          clientDbVersion
         })
       });
 
       if (res.ok) {
-        const result = await res.json() as { users: any[]; leads: any[] };
+        const result = await res.json() as { 
+          success: boolean; 
+          resetLocal?: boolean; 
+          dbVersion: string; 
+          users: any[]; 
+          leads: any[] 
+        };
         if (result && Array.isArray(result.users) && Array.isArray(result.leads)) {
+          // If server told us to clear/overwrite local storage due to desync or database reset:
+          if (result.resetLocal) {
+            console.warn('[Sync] Server requested database version alignment or reset. Updating local state.');
+            localStorage.removeItem('lead_ctv_users_cache');
+            localStorage.removeItem('lead_ctv_leads_cache');
+          }
+
           // Update client-side local database structure
           const mergedDb: LocalDb = {
             users: result.users,
             leads: result.leads
           };
           saveLocalDb(mergedDb);
+          localStorage.setItem('ctv_lead_db_version', result.dbVersion);
 
           // Update cache keys for subscriptions
           localStorage.setItem('lead_ctv_users_cache', JSON.stringify(result.users));
           localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(result.leads));
           
-          console.log('[Sync] Database synchronized successfully with server.');
+          // Notify active UI listeners about the sync
+          notifyUserListeners(result.users);
+          notifyLeadListeners(result.leads);
+
+          // Log out non-admin users whose profile is no longer present
+          const stored = localStorage.getItem(STORAGE_CURRENT_USER_KEY);
+          if (stored) {
+            try {
+              const cachedUser = JSON.parse(stored) as UserProfile;
+              const stillExists = result.users.some((u: any) => u.uid === cachedUser.uid);
+              if (!stillExists && cachedUser.email !== 'clone1phobo@gmail.com') {
+                console.warn('[Sync] Logged-in user is not present on server. Terminating session.');
+                localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+                window.location.reload();
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+
+          console.log('[Sync] Database synchronized successfully with server. Version:', result.dbVersion);
         }
       }
     } catch (err) {

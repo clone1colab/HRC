@@ -51,6 +51,25 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
   const [editParentCommission, setEditParentCommission] = useState<number>(0);
   const [editIsPaid, setEditIsPaid] = useState<boolean>(false);
   const [savingLeadId, setSavingLeadId] = useState<string | null>(null);
+  const [isWiping, setIsWiping] = useState(false);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+
+  const handleWipeDatabase = async () => {
+    setIsWiping(true);
+    setShowWipeConfirm(false);
+    try {
+      const success = await dbService.resetDatabase(user.email);
+      if (success) {
+        showToast('🗑️ Đã xoá sạch toàn bộ dữ liệu thành công!', 'success');
+      } else {
+        showToast('Xóa dữ liệu thất bại, vui lòng thử lại.', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Lỗi khi xóa dữ liệu.', 'error');
+    } finally {
+      setIsWiping(false);
+    }
+  };
 
   // 1. Subscribe to Users (Realtime)
   useEffect(() => {
@@ -218,6 +237,48 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 pb-16 font-sans">
+      {/* Wipe Database Confirmation Overlay Modal */}
+      {showWipeConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
+          <div className="bg-white border border-slate-200 max-w-md w-full rounded-3xl p-6 shadow-2xl animate-scale-up text-left">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                <AlertCircle className="w-6 h-6 animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-lg font-black text-slate-900">Xác nhận Xóa sạch dữ liệu?</h3>
+                <p className="text-sm text-slate-500 leading-relaxed font-semibold">
+                  Hành động này sẽ <strong className="text-rose-600">XÓA SẠCH HOÀN TOÀN</strong> cơ sở dữ liệu của bạn, bao gồm:
+                </p>
+                <ul className="list-disc list-inside text-xs text-slate-500 font-bold space-y-1 pl-1">
+                  <li>Tất cả tài khoản Cộng tác viên (CTV)</li>
+                  <li>Tất cả dữ liệu khách hàng (Leads)</li>
+                  <li>Tất cả lịch sử hoa hồng, thanh toán</li>
+                </ul>
+                <p className="text-xs text-amber-600 font-bold bg-amber-50 p-2.5 rounded-xl border border-amber-200 mt-2">
+                  ⚠️ Tài khoản Admin duy nhất của bạn ({user.email}) với mật khẩu cũ vẫn sẽ được giữ lại để bạn đăng nhập bình thường.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 justify-end mt-6">
+              <button
+                onClick={() => setShowWipeConfirm(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={handleWipeDatabase}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-md shadow-rose-500/20"
+              >
+                Đồng ý Xóa sạch ngay!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner Accent Line */}
       <div className="h-1.5 bg-gradient-to-r from-yellow-400 via-amber-500 to-yellow-500 w-full" />
 
@@ -241,8 +302,15 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
 
           <div className="flex items-center gap-3">
             <button
+              onClick={() => setShowWipeConfirm(true)}
+              disabled={isWiping}
+              className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+            >
+              {isWiping ? 'Đang xóa...' : '🗑️ Xóa toàn bộ dữ liệu'}
+            </button>
+            <button
               onClick={onLogout}
-              className="px-4 py-2 text-xs font-bold text-rose-600 hover:text-white hover:bg-rose-600 rounded-xl transition border border-rose-200 hover:border-rose-600 flex items-center gap-1.5 cursor-pointer bg-white shadow-sm"
+              className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-white hover:bg-slate-600 rounded-xl transition border border-slate-200 hover:border-slate-600 flex items-center gap-1.5 cursor-pointer bg-white shadow-sm"
             >
               Đăng xuất Admin
             </button>

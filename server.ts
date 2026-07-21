@@ -75,6 +75,7 @@ app.use((req, res, next) => {
 function readDb() {
   if (!fs.existsSync(DB_FILE)) {
     const initial = {
+      dbVersion: 'v_init_' + Date.now(),
       users: [
         {
           uid: 'admin_default_uid',
@@ -95,10 +96,15 @@ function readDb() {
   }
   try {
     const content = fs.readFileSync(DB_FILE, 'utf8');
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    if (!parsed.dbVersion) {
+      parsed.dbVersion = 'v_init_' + Date.now();
+      fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), 'utf8');
+    }
+    return parsed;
   } catch (error) {
     console.error('Error reading db file, resetting:', error);
-    return { users: [], leads: [] };
+    return { dbVersion: 'v_init_' + Date.now(), users: [], leads: [] };
   }
 }
 
@@ -334,13 +340,15 @@ app.post('/api/users/reject', (req, res) => {
   }
 
   dbData.users.splice(userIndex, 1);
+  dbData.dbVersion = 'v_incarnation_' + Date.now();
   writeDb(dbData);
 
   const cleanUsers = dbData.users.map(({ password: _, ...u }: any) => u);
   broadcast({
     type: 'user_rejected',
     uid,
-    users: cleanUsers
+    users: cleanUsers,
+    dbVersion: dbData.dbVersion
   });
 
   res.json({ success: true });
@@ -498,8 +506,24 @@ app.get('/api/stats', (req, res) => {
 // 10. Synchronize client database with server
 app.post('/api/sync', (req, res) => {
   try {
-    const { users, leads } = req.body;
+    const { users, leads, clientDbVersion } = req.body;
     const dbData = readDb();
+    const serverDbVersion = dbData.dbVersion || 'v_init';
+
+    // If client version does not match the server's truth, do NOT merge client's stale/deleted records.
+    // Instead, overwrite client's local storage with the server's central truth.
+    if (!clientDbVersion || clientDbVersion !== serverDbVersion) {
+      logMessage(`Sync: client dbVersion [${clientDbVersion}] mismatches server [${serverDbVersion}]. Resetting client database.`);
+      const cleanUsers = dbData.users.map(({ password: _, ...u }: any) => u);
+      return res.json({
+        success: true,
+        resetLocal: true,
+        dbVersion: serverDbVersion,
+        users: cleanUsers,
+        leads: dbData.leads || []
+      });
+    }
+
     let updated = false;
 
     // Merge users
@@ -572,12 +596,68 @@ app.post('/api/sync', (req, res) => {
     const cleanUsers = dbData.users.map(({ password: _, ...u }: any) => u);
     res.json({
       success: true,
+      dbVersion: serverDbVersion,
       users: cleanUsers,
-      leads: dbData.leads
+      leads: dbData.leads || []
     });
   } catch (error: any) {
     logMessage(`Error during sync: ${error.message}`);
     res.status(500).json({ message: `Lỗi đồng bộ: ${error.message}` });
+  }
+});
+
+// 11. Reset database (Admin only)
+app.post('/api/admin/reset-database', (req, res) => {
+  try {
+    const { adminEmail } = req.body;
+    if (adminEmail !== 'clone1phobo@gmail.com') {
+      return res.status(403).json({ message: 'Bạn không có quyền thực hiện hành động này.' });
+    }
+
+    const resetDb = {
+      dbVersion: 'v_reset_' + Date.now(),
+      users: [
+        {
+          uid: 'admin_default_uid',
+          email: 'clone1phobo@gmail.com',
+          password: 'nguyen2000',
+          zaloName: 'Lê Đức Nguyên',
+          role: 'admin',
+          isApproved: true,
+          referralCode: '123456',
+          referredByCode: null,
+          createdAt: new Date().toISOString()
+        }
+      ],
+      leads: []
+    };
+
+    writeDb(resetDb);
+    logMessage(`Database wiped and reset by admin ${adminEmail}.`);
+
+    // Broadcast reset event to all clients
+    broadcast({
+      type: 'db_reset',
+      dbVersion: resetDb.dbVersion,
+      users: [
+        {
+          uid: 'admin_default_uid',
+          email: 'clone1phobo@gmail.com',
+          zaloName: 'Lê Đức Nguyên',
+          role: 'admin',
+          isApproved: true,
+          referralCode: '123456',
+          referredByCode: null,
+          createdAt: resetDb.users[0].createdAt
+        }
+      ],
+      leads: []
+    });
+
+    res.json({ success: true, message: 'Đã xóa toàn bộ cơ sở dữ liệu thành công.' });
+  } catch (error: any) {
+    logMessage(`Error resetting database: ${error.message}`);
+    res.status(500).json({ message: `Lỗi khi reset cơ sở dữ liệu: ${error.message}` });
   }
 });
 
