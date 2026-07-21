@@ -17,8 +17,8 @@ service cloud.firestore {
 
     // Rules for Users
     match /users/{userId} {
-      // Allow reading profile if it's the user themselves or the admin
-      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      // Allow reading profile if user is authenticated
+      allow read: if request.auth != null;
       
       // Allow creation during sign up (user creates their own profile)
       allow create: if request.auth != null && request.auth.uid == userId;

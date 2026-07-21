@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { dbService } from '../services/db';
 import { UserProfile, Lead, LeadStatus } from '../types';
+import { isUsingRealFirebase } from '../lib/firebase';
 import {
   Users,
   CheckCircle,
@@ -250,6 +251,27 @@ export default function AdminDashboard({ user, onLogout, showToast }: AdminDashb
       </header>
 
       <main className="max-w-7xl mx-auto px-6 mt-8">
+        {!isUsingRealFirebase ? (
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm animate-fade-in">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-amber-800">Cơ sở dữ liệu đang ở chế độ Sandbox (Không đồng bộ đa thiết bị)</h4>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                Để hệ thống hoạt động đồng bộ hóa dữ liệu thời gian thực và lưu trữ vĩnh viễn trên nhiều thiết bị (Cloud Run), vui lòng thiết lập các thông số cấu hình Firebase trong phần <strong>Settings / Cài Đặt</strong> của AI Studio nhé!
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl mb-6 flex items-start gap-3 shadow-sm animate-fade-in">
+            <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-emerald-800">Đã kích hoạt đồng bộ hóa đám mây thời gian thực (Firebase Firestore)</h4>
+              <p className="text-xs text-emerald-700 leading-relaxed">
+                Cơ sở dữ liệu của bạn đang được đồng bộ hóa trực tiếp trên đám mây trong thời gian thực. Tất cả các CTV và Admin sẽ nhận thông tin cập nhật tức thì trên mọi thiết bị!
+              </p>
+            </div>
+          </div>
+        )}
         
         {/* Core Admin Stats Overview Block */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

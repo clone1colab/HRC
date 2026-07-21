@@ -4,6 +4,24 @@
  */
 
 import { UserProfile, Lead, CTVStats } from '../types';
+import { db as firestoreDb, auth as firebaseAuth, isUsingRealFirebase } from '../lib/firebase';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query, 
+  where 
+} from 'firebase/firestore';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword,
+  updateProfile
+} from 'firebase/auth';
 
 const STORAGE_CURRENT_USER_KEY = 'ctv_lead_current_user';
 const STORAGE_LOCAL_DB_KEY = 'ctv_lead_local_db';
@@ -348,6 +366,66 @@ const signInLocal = async (email: string, password: string): Promise<UserProfile
 export const authService = {
   // Sign up CTV
   signUp: async (email: string, password: string, zaloName: string, referredByCodeInput: string | null): Promise<UserProfile> => {
+    if (isUsingRealFirebase) {
+      try {
+        // Create user in firebase authentication
+        const credential = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+        const uid = credential.user.uid;
+
+        // Fetch all users in firebase to make sure referralCode is unique
+        const q = query(collection(firestoreDb, 'users'));
+        const snap = await getDocs(q);
+        const existingUsers = snap.docs.map(doc => doc.data() as UserProfile);
+
+        const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+        let referralCode = generateCode();
+        let attempts = 0;
+        while (existingUsers.some((u) => u.referralCode === referralCode) && attempts < 50) {
+          referralCode = generateCode();
+          attempts++;
+        }
+
+        const isAdminAccount = email.trim().toLowerCase() === 'clone1phobo@gmail.com';
+        const role = isAdminAccount ? 'admin' : 'ctv';
+        const isApproved = true; // Auto-approved on signup
+
+        const profile: UserProfile = {
+          uid,
+          email: email.trim().toLowerCase(),
+          zaloName: zaloName.trim(),
+          role,
+          isApproved,
+          referralCode,
+          referredByCode: referredByCodeInput?.trim() || null,
+          createdAt: new Date().toISOString(),
+        };
+
+        // Write profile to Firestore
+        await setDoc(doc(firestoreDb, 'users', uid), profile);
+
+        // Update display name in auth
+        try {
+          await updateProfile(credential.user, { displayName: zaloName.trim() });
+        } catch (e) {
+          console.warn('Failed to update user profile displayName:', e);
+        }
+
+        // Save current user locally
+        localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
+        return profile;
+      } catch (err: any) {
+        let message = err.message || 'Lỗi đăng ký Firebase.';
+        if (err.code === 'auth/email-already-in-use') {
+          message = 'Email này đã được sử dụng.';
+        } else if (err.code === 'auth/weak-password') {
+          message = 'Mật khẩu yếu. Vui lòng nhập từ 6 ký tự trở lên.';
+        } else if (err.code === 'auth/invalid-email') {
+          message = 'Địa chỉ email không đúng định dạng.';
+        }
+        throw new Error(message);
+      }
+    }
+
     try {
       const response = await apiFetch('/api/auth/signup', {
         method: 'POST',
@@ -417,6 +495,31 @@ export const authService = {
 
   // Sign in
   signIn: async (email: string, password: string): Promise<UserProfile> => {
+    if (isUsingRealFirebase) {
+      try {
+        const credential = await signInWithEmailAndPassword(firebaseAuth, email, password);
+        const uid = credential.user.uid;
+
+        // Get profile from Firestore
+        const userDoc = await getDoc(doc(firestoreDb, 'users', uid));
+        if (!userDoc.exists()) {
+          throw new Error('Không tìm thấy thông tin tài khoản CTV trên hệ thống.');
+        }
+
+        const profile = userDoc.data() as UserProfile;
+        localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
+        return profile;
+      } catch (err: any) {
+        let message = err.message || 'Lỗi đăng nhập Firebase.';
+        if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+          message = 'Email hoặc mật khẩu không chính xác.';
+        } else if (err.code === 'auth/invalid-email') {
+          message = 'Địa chỉ email không đúng định dạng.';
+        }
+        throw new Error(message);
+      }
+    }
+
     try {
       const response = await apiFetch('/api/auth/signin', {
         method: 'POST',
@@ -491,10 +594,54 @@ export const authService = {
   // Sign out
   signOut: async (): Promise<void> => {
     localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+    if (isUsingRealFirebase) {
+      await firebaseAuth.signOut();
+    }
   },
 
-  // Watch Auth State with short polling to keep in sync across devices
+  // Watch Auth State with short polling or Firebase listener
   onAuthStateChanged: (callback: (user: UserProfile | null) => void) => {
+    if (isUsingRealFirebase) {
+      const unsubscribeAuth = firebaseAuth.onAuthStateChanged(async (firebaseUser: any) => {
+        if (!firebaseUser) {
+          localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+          callback(null);
+          return;
+        }
+
+        try {
+          const userDoc = await getDoc(doc(firestoreDb, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const profile = userDoc.data() as UserProfile;
+            localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(profile));
+            callback(profile);
+          } else {
+            const stored = localStorage.getItem(STORAGE_CURRENT_USER_KEY);
+            if (stored) {
+              const profile = JSON.parse(stored) as UserProfile;
+              await setDoc(doc(firestoreDb, 'users', firebaseUser.uid), profile);
+              callback(profile);
+            } else {
+              callback(null);
+            }
+          }
+        } catch (err) {
+          const stored = localStorage.getItem(STORAGE_CURRENT_USER_KEY);
+          if (stored) {
+            try {
+              callback(JSON.parse(stored) as UserProfile);
+            } catch (_) {
+              callback(null);
+            }
+          } else {
+            callback(null);
+          }
+        }
+      });
+
+      return unsubscribeAuth;
+    }
+
     const checkAuth = async () => {
       const stored = localStorage.getItem(STORAGE_CURRENT_USER_KEY);
       if (!stored) {
@@ -569,10 +716,57 @@ export const authService = {
   },
 };
 
+// Helper to calculate CTV Stats locally from a list of leads
+const calculateCTVStatsLocal = (ctvId: string, leads: Lead[]): CTVStats => {
+  const directLeads = leads.filter((l) => l.ctvId === ctvId);
+  const directSalesCount = directLeads.filter((l) => l.status === 'chot_don').length;
+
+  const f1Leads = leads.filter((l) => l.parentCtvId === ctvId);
+  const f1SalesCount = f1Leads.filter((l) => l.status === 'chot_don').length;
+
+  const directCommission = directLeads
+    .filter((l) => l.status === 'chot_don')
+    .reduce((sum, l) => sum + (l.commissionAmount || 0), 0);
+
+  const parentCommission = f1Leads
+    .filter((l) => l.status === 'chot_don')
+    .reduce((sum, l) => sum + (l.parentCommissionAmount || 0), 0);
+
+  let totalCommissionPaid = 0;
+  let totalCommissionPending = 0;
+
+  directLeads.filter((l) => l.status === 'chot_don').forEach((l) => {
+    if (l.isPaidCommission) {
+      totalCommissionPaid += l.commissionAmount || 0;
+    } else {
+      totalCommissionPending += l.commissionAmount || 0;
+    }
+  });
+
+  f1Leads.filter((l) => l.status === 'chot_don').forEach((l) => {
+    if (l.isPaidCommission) {
+      totalCommissionPaid += l.parentCommissionAmount || 0;
+    } else {
+      totalCommissionPending += l.parentCommissionAmount || 0;
+    }
+  });
+
+  return {
+    directSalesCount,
+    f1SalesCount,
+    directCommission,
+    parentCommission,
+    totalCommissionPaid,
+    totalCommissionPending,
+  };
+};
+
 // --- DATA SERVICE ---
 export const dbService = {
   // Synchronize client LocalStorage database with server database
   syncDatabase: async (): Promise<void> => {
+    if (isUsingRealFirebase) return; // Not needed with direct Firebase synchronization
+
     try {
       const dbData = getLocalDb();
       const res = await apiFetch('/api/sync', {
@@ -608,6 +802,20 @@ export const dbService = {
 
   // Subscribe to Users list (Realtime Polling)
   subscribeUsers: (callback: (users: UserProfile[]) => void) => {
+    if (isUsingRealFirebase) {
+      const unsub = onSnapshot(collection(firestoreDb, 'users'), (snapshot) => {
+        const users: UserProfile[] = [];
+        snapshot.forEach((doc) => {
+          users.push(doc.data() as UserProfile);
+        });
+        const sorted = [...users].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        localStorage.setItem('lead_ctv_users_cache', JSON.stringify(sorted));
+        callback(sorted);
+        notifyUserListeners(sorted);
+      });
+      return unsub;
+    }
+
     userListeners.push(callback);
 
     const cached = localStorage.getItem('lead_ctv_users_cache');
@@ -644,6 +852,11 @@ export const dbService = {
 
   // Approve a CTV account
   approveUser: async (uid: string): Promise<void> => {
+    if (isUsingRealFirebase) {
+      await updateDoc(doc(firestoreDb, 'users', uid), { isApproved: true });
+      return;
+    }
+
     try {
       const res = await apiFetch('/api/users/approve', {
         method: 'POST',
@@ -686,6 +899,11 @@ export const dbService = {
 
   // Reject a CTV account (Delete from registration list)
   rejectUser: async (uid: string): Promise<void> => {
+    if (isUsingRealFirebase) {
+      await deleteDoc(doc(firestoreDb, 'users', uid));
+      return;
+    }
+
     try {
       const res = await apiFetch('/api/users/reject', {
         method: 'POST',
@@ -722,6 +940,25 @@ export const dbService = {
 
   // Subscribe to Leads (Realtime Polling)
   subscribeLeads: (callback: (leads: Lead[]) => void) => {
+    if (isUsingRealFirebase) {
+      const unsub = onSnapshot(collection(firestoreDb, 'leads'), (snapshot) => {
+        const leads: Lead[] = [];
+        snapshot.forEach((doc) => {
+          leads.push(doc.data() as Lead);
+        });
+        const sorted = [...leads].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        localStorage.setItem('lead_ctv_leads_cache', JSON.stringify(sorted));
+        callback(sorted);
+        notifyLeadListeners(sorted);
+
+        // Notify active stats subscriptions
+        statsListeners.forEach((item) => {
+          item.fetchStats();
+        });
+      });
+      return unsub;
+    }
+
     leadListeners.push(callback);
 
     const cached = localStorage.getItem('lead_ctv_leads_cache');
@@ -758,6 +995,39 @@ export const dbService = {
 
   // Add a new Lead
   addLead: async (customerName: string, customerPhone: string, note: string, ctvUser: UserProfile): Promise<Lead> => {
+    if (isUsingRealFirebase) {
+      const leadId = 'lead_' + Math.random().toString(36).substr(2, 9);
+      
+      // Determine parent CTV if ctvUser has a referrer code
+      let parentCtvId: string | null = null;
+      if (ctvUser.referredByCode) {
+        const q = query(collection(firestoreDb, 'users'), where('referralCode', '==', ctvUser.referredByCode));
+        const parentSnap = await getDocs(q);
+        if (!parentSnap.empty) {
+          parentCtvId = parentSnap.docs[0].id;
+        }
+      }
+
+      const newLead: Lead = {
+        id: leadId,
+        ctvId: ctvUser.uid,
+        ctvZaloName: ctvUser.zaloName,
+        ctvReferralCode: ctvUser.referralCode,
+        parentCtvId,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        note: note || '',
+        status: 'chua_check',
+        isPaidCommission: false,
+        commissionAmount: 0,
+        parentCommissionAmount: 0,
+        createdAt: new Date().toISOString()
+      };
+
+      await setDoc(doc(firestoreDb, 'leads', leadId), newLead);
+      return newLead;
+    }
+
     try {
       const res = await apiFetch('/api/leads', {
         method: 'POST',
@@ -847,6 +1117,11 @@ export const dbService = {
 
   // Update a Lead (Status, commission amount, paid status)
   updateLead: async (leadId: string, updates: Partial<Lead>): Promise<void> => {
+    if (isUsingRealFirebase) {
+      await updateDoc(doc(firestoreDb, 'leads', leadId), updates);
+      return;
+    }
+
     try {
       const res = await apiFetch(`/api/leads/${leadId}`, {
         method: 'PUT',
@@ -921,8 +1196,22 @@ export const dbService = {
     }
   },
 
-  // Subscribe to statistics for a specific CTV (Realtime Polling)
+  // Subscribe to statistics for a specific CTV (Realtime Polling or Local Calculation on snap)
   subscribeCTVStats: (ctvId: string, callback: (stats: CTVStats) => void) => {
+    if (isUsingRealFirebase) {
+      const unsub = onSnapshot(collection(firestoreDb, 'leads'), (snapshot) => {
+        const leads: Lead[] = [];
+        snapshot.forEach((doc) => {
+          leads.push(doc.data() as Lead);
+        });
+        const stats = calculateCTVStatsLocal(ctvId, leads);
+        const cacheKey = `lead_ctv_stats_cache_${ctvId}`;
+        localStorage.setItem(cacheKey, JSON.stringify(stats));
+        callback(stats);
+      });
+      return unsub;
+    }
+
     const cacheKey = `lead_ctv_stats_cache_${ctvId}`;
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
